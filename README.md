@@ -116,18 +116,19 @@ Open **Command Prompt** in this folder and run, one block at a time:
 ```bat
 uv venv
 .venv\Scripts\activate
-uv pip install customtkinter keyboard
-python main.py
+uv sync
+uv run betaal
 ```
 
-That's it — the settings window opens. Press `ctrl+shift+space` in any text box
-(Notepad, Chrome, Word) and the placeholder text is typed at your cursor.
+That's it — the settings window opens. Press `ctrl+shift+space` once to start
+continuous dictation, and press it again to stop. Recognized text is pushed to
+the key-injection queue and typed at your cursor (Notepad, Chrome, Word, etc.).
 
 Next time, just run:
 
 ```bat
 .venv\Scripts\activate
-python main.py
+uv run betaal
 ```
 
 ### Local setup
@@ -135,13 +136,27 @@ python main.py
 ```bash
 uv venv
 .venv\Scripts\activate            # Windows
-uv pip install customtkinter keyboard
-python main.py
+uv sync
+uv run betaal
 ```
 
-Press the hotkey (default `ctrl+shift+space`) in any text field; after a brief
-delay the placeholder text is typed at the cursor. Settings save to
-`config.json`; analytics persist in `app_metrics.db`.
+If you prefer an explicit editable install flow instead of `uv sync`:
+
+```bash
+uv pip install -e .
+uv run betaal
+```
+
+Press the hotkey (default `ctrl+shift+space`) once to start continuous
+dictation and again to stop. Settings save to `config.json`; analytics persist
+in `app_metrics.db`.
+
+ASR model selection now includes `Cohere-transcribe` in the GUI. Internally it
+maps to the registry ID `Aditya02/cohere-transcribe-03-2026-ov-fp16`.
+On first run, Betaal auto-downloads missing model assets into `models/`:
+
+- ASR OpenVINO model snapshot under `models/asr/`
+- ONNX Silero VAD file at `models/vad/silero_vad.onnx`
 
 > Note: the `keyboard` library requires Administrator rights for global hooks in
 > some apps. Run the terminal/exe as Administrator if the hotkey is blocked.

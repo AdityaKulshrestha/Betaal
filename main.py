@@ -4,6 +4,7 @@ import json
 import os
 
 from core.hotkey_listener import HotkeyListener
+from core.model_registry import DEFAULT_MODEL_DISPLAY
 from database import db_manager
 from gui.settings_window import SettingsWindow
 
@@ -13,7 +14,7 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
     "vad_threshold": 0.5,
-    "asr_model": "Local Base",
+    "asr_model": DEFAULT_MODEL_DISPLAY,
 }
 
 
@@ -38,7 +39,11 @@ def main():
     config = load_config()
     db_manager.init_db()
 
-    listener = HotkeyListener(hotkey=config["hotkey"])
+    listener = HotkeyListener(
+        hotkey=config["hotkey"],
+        model_name=config["asr_model"],
+        vad_threshold=config["vad_threshold"],
+    )
     listener.start()
 
     app = SettingsWindow(config)

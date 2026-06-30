@@ -6,6 +6,7 @@ focus, then logs the session to the analytics database.
 """
 
 import threading
+import queue
 
 import keyboard
 
@@ -19,26 +20,63 @@ DEFAULT_HOTKEY = "ctrl+shift+space"
 class HotkeyListener:
     """Runs the global hotkey hook on a dedicated daemon thread."""
 
-    def __init__(self, hotkey=DEFAULT_HOTKEY, type_delay=0.01):
+    def __init__(
+        self,
+        hotkey=DEFAULT_HOTKEY,
+        type_delay=0.01,
+        model_name="Cohere-transcribe",
+        vad_threshold=0.5,
+    ):
         self._hotkey = hotkey or DEFAULT_HOTKEY
         self._type_delay = type_delay
-        self._pipeline = TextPipeline()
+        self._pipeline = TextPipeline(
+            model_display_name=model_name,
+            vad_threshold=vad_threshold,
+        )
         self._thread = None
-        self._busy = threading.Lock()
+        self._key_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
+        self._key_thread = None
+        self._dictation_thread = None
+        self._stop_event = threading.Event()
+        self._state_lock = threading.Lock()
+
+    def _key_worker(self):
+        while True:
+            text = self._key_queue.get()
+            if not text:
+                continue
+            try:
+                keyboard.write(text, delay=self._type_delay)
+            except Exception as exc:  # pragma: no cover - runtime guard
+                print(f"[Betaal][hotkey] Key injection failed: {exc}")
+
+    def _dictation_loop(self):
+        while not self._stop_event.is_set():
+            try:
+                text, duration = self._pipeline.process(
+                    capture_seconds=3.0,
+                    stop_event=self._stop_event,
+                )
+                if not text:
+                    continue
+                self._key_queue.put(text)
+                words = len(text.split())
+                db_manager.log_entry(words, duration)
+            except Exception as exc:  # pragma: no cover - defensive runtime guard
+                print(f"[Betaal][hotkey] Dictation loop error: {exc}")
 
     def _on_trigger(self):
-        # Avoid overlapping injections if the hotkey is pressed repeatedly.
-        if not self._busy.acquire(blocking=False):
-            return
-        try:
-            text, duration = self._pipeline.process()
-            keyboard.write(text, delay=self._type_delay)
-            words = len(text.split())
-            db_manager.log_entry(words, duration)
-        except Exception as exc:  # pragma: no cover - defensive runtime guard
-            print(f"[Betaal][hotkey] Injection failed: {exc}")
-        finally:
-            self._busy.release()
+        with self._state_lock:
+            active = self._dictation_thread is not None and self._dictation_thread.is_alive()
+            if active:
+                self._stop_event.set()
+                print("[Betaal] Dictation stopped")
+                return
+
+            self._stop_event.clear()
+            self._dictation_thread = threading.Thread(target=self._dictation_loop, daemon=True)
+            self._dictation_thread.start()
+            print("[Betaal] Dictation started")
 
     def _run(self):
         try:
@@ -51,6 +89,9 @@ class HotkeyListener:
 
     def start(self):
         """Launch the listener on a background daemon thread."""
+        self._key_thread = threading.Thread(target=self._key_worker, daemon=True)
+        self._key_thread.start()
+
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return self._thread

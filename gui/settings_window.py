@@ -5,12 +5,13 @@ import os
 
 import customtkinter as ctk
 
+from core.model_registry import DEFAULT_MODEL_DISPLAY, list_model_names
 from database import db_manager
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
 
-MODEL_OPTIONS = ["Cloud API", "Local Base", "Local Large"]
+MODEL_OPTIONS = list_model_names()
 
 
 class SettingsWindow(ctk.CTk):
@@ -73,7 +74,10 @@ class SettingsWindow(ctk.CTk):
 
         ctk.CTkLabel(parent, text="ASR Model").pack(anchor="w", padx=12)
         self.model_dropdown = ctk.CTkOptionMenu(parent, values=MODEL_OPTIONS)
-        self.model_dropdown.set(self._config.get("asr_model", "Local Base"))
+        selected_model = self._config.get("asr_model", DEFAULT_MODEL_DISPLAY)
+        if selected_model not in MODEL_OPTIONS:
+            selected_model = DEFAULT_MODEL_DISPLAY
+        self.model_dropdown.set(selected_model)
         self.model_dropdown.pack(fill="x", padx=12, pady=(0, 12))
 
         self.status = ctk.CTkLabel(parent, text="")
