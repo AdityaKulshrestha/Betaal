@@ -6,6 +6,8 @@ passes chunks through a low-overhead ASR queue, and returns merged text.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import queue
 import threading
 import time
@@ -98,46 +100,156 @@ class SileroVADChunker:
 
 
 class OVASRBackend:
-    """OpenVINO-backed ASR wrapper, preferring GPU execution."""
+    """Cohere OpenVINO IR ASR wrapper (KV-cache decode), preferring GPU."""
 
     def __init__(self, model_dir: str, device: str = "GPU"):
         self._model_dir = model_dir
         self._device = device
-        self._pipeline = None
+        self._ctx = None
+        self._sample_rate = 16000
+        self._max_new_tokens = 96
         self._load()
 
-    def _load(self) -> None:
+    def _load_ctx(self, device: str) -> bool:
+        """Load Cohere OpenVINO IR graphs for direct KV-cache decoding."""
+        meta_path = Path(self._model_dir) / "ov_cohere_transcribe_kvcache.json"
+        if not meta_path.is_file():
+            return False
+
         try:
-            import openvino_genai as ov_genai
+            import openvino as ov
+            from transformers import AutoProcessor
+        except Exception as exc:
+            print(f"[Betaal][asr] Fallback dependencies unavailable: {exc}")
+            return False
 
-            self._pipeline = ov_genai.WhisperPipeline(self._model_dir, self._device)
-            print(f"[Betaal][asr] Loaded OpenVINO Whisper pipeline on {self._device}")
-        except Exception as first_exc:  # pragma: no cover - runtime environment dependent
-            print(f"[Betaal][asr] GPU init failed: {first_exc}")
-            try:
-                import openvino_genai as ov_genai
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            model_dir = Path(self._model_dir)
+            processor = AutoProcessor.from_pretrained(str(model_dir))
+            core = ov.Core()
+            encoder = core.compile_model(model_dir / meta["encoder_ir"], device)
+            prefill = core.compile_model(model_dir / meta["decoder_ir"], device)
+            decode = core.compile_model(model_dir / meta["decoder_with_past_ir"], device)
+            eos = meta["eos_token_id"]
+            eos_set = set(eos) if isinstance(eos, (list, tuple)) else {eos}
+            num_layers = int(meta["num_layers"])
 
-                self._pipeline = ov_genai.WhisperPipeline(self._model_dir, "CPU")
-                print("[Betaal][asr] Falling back to CPU")
-            except Exception as second_exc:
-                print(f"[Betaal][asr] ASR backend unavailable: {second_exc}")
-                self._pipeline = None
+            self._ctx = {
+                "processor": processor,
+                "encoder": encoder,
+                "prefill": prefill,
+                "decode": decode,
+                "eos_set": eos_set,
+                "num_layers": num_layers,
+            }
+            print(f"[Betaal][asr] Loaded KV-cache ASR pipeline on {device}")
+            return True
+        except Exception as exc:
+            print(f"[Betaal][asr] KV-cache init failed on {device}: {exc}")
+            return False
+
+    @staticmethod
+    def _to_named_outputs(result: dict) -> dict:
+        named = {}
+        for key, value in result.items():
+            if hasattr(key, "get_any_name"):
+                named[key.get_any_name()] = value
+            else:
+                named[str(key)] = value
+        return named
+
+    @staticmethod
+    def _np(x, dtype):
+        return np.asarray(x.cpu() if hasattr(x, "cpu") else x).astype(dtype)
+
+    def _transcribe(self, audio_chunk: np.ndarray) -> str:
+        ctx = self._ctx
+        if not ctx:
+            return ""
+
+        processor = ctx["processor"]
+        encoder = ctx["encoder"]
+        prefill = ctx["prefill"]
+        decode = ctx["decode"]
+        eos_set = ctx["eos_set"]
+        num_layers = ctx["num_layers"]
+
+        inputs = processor(audio_chunk, sampling_rate=self._sample_rate, language="en", return_tensors="np")
+        feat = self._np(inputs["input_features"], np.float32)
+        amask = self._np(inputs["attention_mask"], bool)
+        prompt = self._np(inputs["decoder_input_ids"], np.int64)
+
+        enc_res = encoder({"input_features": feat, "attention_mask": amask})
+        ehs = enc_res["encoder_hidden_states"]
+        emask = enc_res["encoder_attention_mask"]
+
+        pf = prefill(
+            {
+                "decoder_input_ids": prompt,
+                "encoder_hidden_states": ehs,
+                "encoder_attention_mask": emask,
+            }
+        )
+        pf = self._to_named_outputs(pf)
+
+        self_kv = [
+            (pf[f"present.{i}.self.key"], pf[f"present.{i}.self.value"])
+            for i in range(num_layers)
+        ]
+        cross_kv = [
+            (pf[f"present.{i}.cross.key"], pf[f"present.{i}.cross.value"])
+            for i in range(num_layers)
+        ]
+
+        next_id = int(pf["logits"][0, -1].argmax())
+        generated = [next_id]
+
+        for _ in range(self._max_new_tokens):
+            if next_id in eos_set:
+                break
+
+            seq_len = self_kv[0][0].shape[2] if self_kv else 0
+            self_mask = np.ones((1, seq_len + 1), dtype=np.int64)
+            feed = {
+                "decoder_input_ids": np.array([[next_id]], dtype=np.int64),
+                "encoder_hidden_states": ehs,
+                "encoder_attention_mask": emask,
+                "self_attention_mask": self_mask,
+            }
+            for i in range(num_layers):
+                feed[f"past.{i}.self.key"] = self_kv[i][0]
+                feed[f"past.{i}.self.value"] = self_kv[i][1]
+                feed[f"past.{i}.cross.key"] = cross_kv[i][0]
+                feed[f"past.{i}.cross.value"] = cross_kv[i][1]
+
+            step = decode(feed)
+            step = self._to_named_outputs(step)
+            self_kv = [
+                (step[f"present.{i}.self.key"], step[f"present.{i}.self.value"])
+                for i in range(num_layers)
+            ]
+
+            next_id = int(step["logits"][0, -1].argmax())
+            generated.append(next_id)
+
+        text = processor.batch_decode([generated], skip_special_tokens=True)[0]
+        return str(text).strip()
+
+    def _load(self) -> None:
+        if self._load_ctx(self._device):
+            return
+        if self._device != "CPU" and self._load_ctx("CPU"):
+            return
+        print("[Betaal][asr] ASR backend unavailable after KV-cache init attempts")
 
     def transcribe(self, audio_chunk: np.ndarray) -> str:
         if audio_chunk.size == 0:
             return ""
-        if self._pipeline is None:
+        if self._ctx is None:
             return ""
-
         try:
-            result = self._pipeline.generate(audio_chunk)
-            if isinstance(result, str):
-                return result.strip()
-            if hasattr(result, "texts") and result.texts:
-                return str(result.texts[0]).strip()
-            if hasattr(result, "text"):
-                return str(result.text).strip()
-            return str(result).strip()
+            return self._transcribe(audio_chunk)
         except Exception as exc:  # pragma: no cover - model behavior dependent
             print(f"[Betaal][asr] Transcription failed: {exc}")
             return ""
