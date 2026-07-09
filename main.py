@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
     "vad_threshold": 0.5,
     "asr_model": DEFAULT_MODEL_DISPLAY,
-    "log_transcript": True,
+    "log_transcript": False,
 }
 
 

@@ -7,14 +7,20 @@ focus, then logs the session to the analytics database.
 
 import threading
 import queue
+import time
 
 import keyboard
+import pyperclip
 
 from core.processor import TextPipeline
 from database import db_manager
 
 # Default combo; overridden by config.json at startup.
 DEFAULT_HOTKEY = "ctrl+shift+space"
+
+# Paste shortcut used for text injection. Ctrl+Shift+V works in terminals;
+# most other apps also accept it (or fall back to Ctrl+V).
+PASTE_HOTKEY = "ctrl+shift+v"
 
 
 class HotkeyListener:
@@ -48,9 +54,13 @@ class HotkeyListener:
             if not text:
                 continue
             try:
-                keyboard.write(text, delay=self._type_delay)
+                previous = pyperclip.paste()
+                pyperclip.copy(text + " ")
+                keyboard.send(PASTE_HOTKEY)
+                time.sleep(0.05)
+                pyperclip.copy(previous)
             except Exception as exc:  # pragma: no cover - runtime guard
-                print(f"[Betaal][hotkey] Key injection failed: {exc}")
+                print(f"[Betaal][hotkey] Clipboard paste failed: {exc}")
 
     def _dictation_loop(self):
         while not self._stop_event.is_set():
