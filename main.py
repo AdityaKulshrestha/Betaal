@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
     "vad_threshold": 0.5,
     "asr_model": DEFAULT_MODEL_DISPLAY,
+    "log_transcript": True,
 }
 
 
@@ -43,6 +44,7 @@ def main():
         hotkey=config["hotkey"],
         model_name=config["asr_model"],
         vad_threshold=config["vad_threshold"],
+        log_transcript=config["log_transcript"],
     )
     listener.start()
 

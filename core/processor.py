@@ -112,9 +112,16 @@ class OVASRBackend:
 
     def _load_ctx(self, device: str) -> bool:
         """Load Cohere OpenVINO IR graphs for direct KV-cache decoding."""
-        meta_path = Path(self._model_dir) / "ov_cohere_transcribe_kvcache.json"
+        model_dir = Path(self._model_dir)
+        meta_path = model_dir / "ov_cohere_transcribe_kvcache.json"
         if not meta_path.is_file():
-            return False
+            nested_dir = model_dir / "models"
+            nested_meta = nested_dir / "ov_cohere_transcribe_kvcache.json"
+            if nested_meta.is_file():
+                model_dir = nested_dir
+                meta_path = nested_meta
+            else:
+                return False
 
         try:
             import openvino as ov
@@ -125,7 +132,6 @@ class OVASRBackend:
 
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            model_dir = Path(self._model_dir)
             processor = AutoProcessor.from_pretrained(str(model_dir))
             core = ov.Core()
             encoder = core.compile_model(model_dir / meta["encoder_ir"], device)
@@ -309,8 +315,14 @@ class TextPipeline:
         mic stream -> silero vad chunks -> asr queue -> merged text
     """
 
-    def __init__(self, model_display_name: str, vad_threshold: float = 0.5):
+    def __init__(
+        self,
+        model_display_name: str,
+        vad_threshold: float = 0.5,
+        log_transcript: bool = False,
+    ):
         self._model_display_name = model_display_name
+        self._log_transcript = log_transcript
         model_paths = ensure_required_models(model_display_name)
 
         self._capture = AudioCapture(sample_rate=16000)
@@ -363,5 +375,10 @@ class TextPipeline:
                 break
             if payload:
                 parts.append(payload)
+                if self._log_transcript:
+                    print(f"[Betaal][asr] chunk: {payload}")
 
-        return " ".join(parts).strip(), time.time() - start
+        merged = " ".join(parts).strip()
+        if self._log_transcript and merged:
+            print(f"[Betaal][asr] transcript: {merged}")
+        return merged, time.time() - start

@@ -26,12 +26,14 @@ class HotkeyListener:
         type_delay=0.01,
         model_name="Cohere-transcribe",
         vad_threshold=0.5,
+        log_transcript=False,
     ):
         self._hotkey = hotkey or DEFAULT_HOTKEY
         self._type_delay = type_delay
         self._pipeline = TextPipeline(
             model_display_name=model_name,
             vad_threshold=vad_threshold,
+            log_transcript=log_transcript,
         )
         self._thread = None
         self._key_queue: queue.SimpleQueue[str] = queue.SimpleQueue()

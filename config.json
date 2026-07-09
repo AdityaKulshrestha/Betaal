@@ -1,5 +1,6 @@
 {
   "hotkey": "ctrl+shift+space",
   "vad_threshold": 0.5,
-  "asr_model": "Local Base"
+  "asr_model": "Local Base",
+  "log_transcript": true
 }

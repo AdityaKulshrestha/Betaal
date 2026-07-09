@@ -6,11 +6,14 @@ Downloads required assets into the local .models/ directory when missing.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from urllib.request import urlopen
 from typing import Dict
 
 from core.model_registry import DEFAULT_MODEL_DISPLAY, resolve_model_id
+
+_META_JSON = "ov_cohere_transcribe_kvcache.json"
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(_BASE_DIR, ".models")
@@ -31,13 +34,49 @@ def _safe_repo_name(repo_id: str) -> str:
     return repo_id.replace("/", "--")
 
 
+def _is_complete_ov_model(model_dir: str) -> bool:
+    """Return True if model_dir holds a complete OV IR model (meta + xml + bin)."""
+    meta_path = os.path.join(model_dir, _META_JSON)
+    if not os.path.isfile(meta_path):
+        return False
+    try:
+        meta = json.loads(open(meta_path, encoding="utf-8").read())
+    except (OSError, ValueError):
+        return False
+
+    for key in ("encoder_ir", "decoder_ir", "decoder_with_past_ir"):
+        xml_name = meta.get(key)
+        if not xml_name:
+            return False
+        xml_path = os.path.join(model_dir, xml_name)
+        bin_path = os.path.splitext(xml_path)[0] + ".bin"
+        if not os.path.isfile(xml_path) or not os.path.isfile(bin_path):
+            return False
+    return True
+
+
+def _find_local_asr_model(repo_id: str) -> str | None:
+    """Locate an already-present complete OV model without downloading."""
+    candidates = [
+        os.path.join(ASR_DIR, _safe_repo_name(repo_id)),
+        os.path.join(ASR_DIR, _safe_repo_name(repo_id), "models"),
+        os.path.join(MODELS_DIR, "models"),
+    ]
+    for candidate in candidates:
+        if _is_complete_ov_model(candidate):
+            return candidate
+    return None
+
+
 def ensure_asr_model(display_name: str) -> str:
     """Ensure ASR model is present locally and return its folder path."""
     repo_id = resolve_model_id(display_name)
-    model_dir = os.path.join(ASR_DIR, _safe_repo_name(repo_id))
-    if os.path.isdir(model_dir) and os.listdir(model_dir):
-        return model_dir
 
+    local = _find_local_asr_model(repo_id)
+    if local is not None:
+        return local
+
+    model_dir = os.path.join(ASR_DIR, _safe_repo_name(repo_id))
     _ensure_dir(ASR_DIR)
     try:
         from huggingface_hub import snapshot_download
