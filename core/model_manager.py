@@ -11,7 +11,7 @@ import os
 from urllib.request import urlopen
 from typing import Dict
 
-from core.model_registry import DEFAULT_MODEL_DISPLAY, resolve_model_id
+from core.model_registry import DEFAULT_MODEL_DISPLAY, resolve_backend, resolve_model_id
 
 _META_JSON = "ov_cohere_transcribe_kvcache.json"
 
@@ -68,15 +68,16 @@ def _find_local_asr_model(repo_id: str) -> str | None:
     return None
 
 
-def ensure_asr_model(display_name: str) -> str:
-    """Ensure ASR model is present locally and return its folder path."""
-    repo_id = resolve_model_id(display_name)
+def _is_complete_whisper_model(model_dir: str) -> bool:
+    """Return True if model_dir holds an OpenVINO GenAI Whisper pipeline."""
+    return os.path.isfile(os.path.join(model_dir, "openvino_encoder_model.xml")) and (
+        os.path.isfile(os.path.join(model_dir, "openvino_decoder_model.xml"))
+        or os.path.isfile(os.path.join(model_dir, "openvino_decoder_with_past_model.xml"))
+    )
 
-    local = _find_local_asr_model(repo_id)
-    if local is not None:
-        return local
 
-    model_dir = os.path.join(ASR_DIR, _safe_repo_name(repo_id))
+def _download_snapshot(repo_id: str, model_dir: str) -> str:
+    """Download a full HF repo snapshot into model_dir and return it."""
     _ensure_dir(ASR_DIR)
     try:
         from huggingface_hub import snapshot_download
@@ -92,6 +93,25 @@ def ensure_asr_model(display_name: str) -> str:
         local_dir_use_symlinks=False,
     )
     return model_dir
+
+
+def ensure_asr_model(display_name: str) -> str:
+    """Ensure the selected ASR model is present locally and return its folder."""
+    repo_id = resolve_model_id(display_name)
+    backend = resolve_backend(display_name)
+    model_dir = os.path.join(ASR_DIR, _safe_repo_name(repo_id))
+
+    if backend == "whisper_genai":
+        for candidate in (model_dir, os.path.join(model_dir, "models")):
+            if _is_complete_whisper_model(candidate):
+                return candidate
+        return _download_snapshot(repo_id, model_dir)
+
+    # Default: Cohere OpenVINO IR model.
+    local = _find_local_asr_model(repo_id)
+    if local is not None:
+        return local
+    return _download_snapshot(repo_id, model_dir)
 
 
 def ensure_vad_model() -> str:

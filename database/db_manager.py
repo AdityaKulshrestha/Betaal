@@ -25,7 +25,7 @@ def _connect():
 
 
 def init_db():
-    """Create the analytics table if it does not already exist."""
+    """Create the analytics and notes tables if they do not already exist."""
     with _lock, _connect() as conn:
         conn.execute(
             """
@@ -35,6 +35,17 @@ def init_db():
                 words_entered       INTEGER NOT NULL,
                 duration_seconds    REAL    NOT NULL,
                 time_saved_seconds  REAL    NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notes (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp         TEXT    NOT NULL,
+                text              TEXT    NOT NULL,
+                word_count        INTEGER NOT NULL,
+                duration_seconds  REAL    NOT NULL
             )
             """
         )
@@ -51,9 +62,10 @@ def _calc_time_saved(words_entered, duration_seconds):
     return minutes_saved * 60.0
 
 
-def log_entry(words_entered, duration_seconds):
-    """Insert a new analytics record and return the time saved (seconds)."""
+def log_entry(words_entered, duration_seconds, text=None):
+    """Insert a new analytics record (and optional note) and return time saved."""
     time_saved = _calc_time_saved(words_entered, duration_seconds)
+    stamp = datetime.now().isoformat(timespec="seconds")
     try:
         with _lock, _connect() as conn:
             conn.execute(
@@ -62,22 +74,78 @@ def log_entry(words_entered, duration_seconds):
                     (timestamp, words_entered, duration_seconds, time_saved_seconds)
                 VALUES (?, ?, ?, ?)
                 """,
-                (datetime.now().isoformat(timespec="seconds"),
-                 int(words_entered), float(duration_seconds), float(time_saved)),
+                (stamp, int(words_entered), float(duration_seconds),
+                 float(time_saved)),
             )
+            if text and str(text).strip():
+                conn.execute(
+                    """
+                    INSERT INTO notes
+                        (timestamp, text, word_count, duration_seconds)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (stamp, str(text).strip(), int(words_entered),
+                     float(duration_seconds)),
+                )
             conn.commit()
     except sqlite3.Error as exc:
         print(f"[Betaal][db] Failed to log entry: {exc}")
     return time_saved
 
 
+def get_notes(limit=200):
+    """Return recent notes (newest first) as a list of dicts."""
+    try:
+        with _lock, _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, timestamp, text, word_count, duration_seconds
+                FROM notes
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [
+            {
+                "id": int(row[0]),
+                "timestamp": row[1],
+                "text": row[2],
+                "word_count": int(row[3]),
+                "duration_seconds": round(float(row[4]), 1),
+            }
+            for row in rows
+        ]
+    except sqlite3.Error as exc:
+        print(f"[Betaal][db] Failed to read notes: {exc}")
+        return []
+
+
+def delete_note(note_id):
+    """Delete a single note by id. Returns True on success."""
+    try:
+        with _lock, _connect() as conn:
+            conn.execute("DELETE FROM notes WHERE id = ?", (int(note_id),))
+            conn.commit()
+        return True
+    except sqlite3.Error as exc:
+        print(f"[Betaal][db] Failed to delete note {note_id}: {exc}")
+        return False
+
+
 def get_stats():
-    """Return aggregated KPIs: total words, sessions, minutes used, minutes saved."""
+    """Return aggregated KPIs for the dashboard.
+
+    Includes total words, sessions, minutes used/saved, and the average number
+    of words captured per active day.
+    """
     defaults = {
         "total_words": 0,
         "total_sessions": 0,
         "total_minutes_used": 0.0,
         "total_minutes_saved": 0.0,
+        "avg_daily_words": 0,
+        "active_days": 0,
     }
     try:
         with _lock, _connect() as conn:
@@ -86,15 +154,21 @@ def get_stats():
                 SELECT COALESCE(SUM(words_entered), 0),
                        COUNT(*),
                        COALESCE(SUM(duration_seconds), 0),
-                       COALESCE(SUM(time_saved_seconds), 0)
+                       COALESCE(SUM(time_saved_seconds), 0),
+                       COUNT(DISTINCT substr(timestamp, 1, 10))
                 FROM analytics
                 """
             ).fetchone()
+        total_words = int(row[0])
+        active_days = int(row[4]) or 0
+        avg_daily = round(total_words / active_days) if active_days else 0
         return {
-            "total_words": int(row[0]),
+            "total_words": total_words,
             "total_sessions": int(row[1]),
             "total_minutes_used": round(row[2] / 60.0, 1),
             "total_minutes_saved": round(row[3] / 60.0, 1),
+            "avg_daily_words": int(avg_daily),
+            "active_days": active_days,
         }
     except sqlite3.Error as exc:
         print(f"[Betaal][db] Failed to read stats: {exc}")

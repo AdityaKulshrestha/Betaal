@@ -1,42 +1,29 @@
-"""Betaal entry point: load config, start hotkey listener, launch GUI."""
+"""Betaal entry point.
 
-import json
-import os
+Default: launch the native PySide6 desktop app (a standalone Windows window)
+which also runs the background dictation engine (global hotkey + ASR).
 
+    python main.py            # native desktop app (default)
+    python main.py headless   # engine only, no window (global hotkey)
+"""
+
+import sys
+import threading
+
+from core.config_store import load_config
 from core.hotkey_listener import HotkeyListener
-from core.model_registry import DEFAULT_MODEL_DISPLAY
 from database import db_manager
-from gui.settings_window import SettingsWindow
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-
-DEFAULT_CONFIG = {
-    "hotkey": "ctrl+shift+space",
-    "vad_threshold": 0.5,
-    "asr_model": DEFAULT_MODEL_DISPLAY,
-    "log_transcript": False,
-}
-
-
-def load_config():
-    """Read config.json, creating it with defaults if missing or invalid."""
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-                cfg = json.load(fh)
-            return {**DEFAULT_CONFIG, **cfg}
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"[Betaal] Bad config, using defaults: {exc}")
-    try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
-            json.dump(DEFAULT_CONFIG, fh, indent=2)
-    except OSError as exc:
-        print(f"[Betaal] Could not write config: {exc}")
-    return dict(DEFAULT_CONFIG)
 
 
 def main():
+    """Launch the native desktop application."""
+    from desktop import run
+
+    run()
+
+
+def headless():
+    """Run the engine with no window: global hotkey + background dictation."""
     config = load_config()
     db_manager.init_db()
 
@@ -48,9 +35,19 @@ def main():
     )
     listener.start()
 
-    app = SettingsWindow(config)
-    app.mainloop()
+    print(
+        f"[Betaal] Running headless. Hotkey: {config['hotkey']}. "
+        "Press Ctrl+C to quit."
+    )
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        print("[Betaal] Shutting down.")
 
 
 if __name__ == "__main__":
-    main()
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "headless":
+        headless()
+    else:
+        main()

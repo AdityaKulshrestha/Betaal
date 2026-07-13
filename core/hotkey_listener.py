@@ -33,6 +33,9 @@ class HotkeyListener:
         model_name="Cohere-transcribe",
         vad_threshold=0.5,
         log_transcript=False,
+        device="GPU",
+        on_note=None,
+        on_state=None,
     ):
         self._hotkey = hotkey or DEFAULT_HOTKEY
         self._type_delay = type_delay
@@ -40,7 +43,10 @@ class HotkeyListener:
             model_display_name=model_name,
             vad_threshold=vad_threshold,
             log_transcript=log_transcript,
+            device=device,
         )
+        self._on_note = on_note
+        self._on_state = on_state
         self._thread = None
         self._key_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._key_thread = None
@@ -63,19 +69,51 @@ class HotkeyListener:
                 print(f"[Betaal][hotkey] Clipboard paste failed: {exc}")
 
     def _dictation_loop(self):
-        while not self._stop_event.is_set():
-            try:
-                text, duration = self._pipeline.process(
-                    capture_seconds=3.0,
-                    stop_event=self._stop_event,
-                )
-                if not text:
+        # One "session" spans a full hotkey press -> press cycle. We inject each
+        # recognized chunk live (so text appears as you speak) but accumulate the
+        # whole session and log a SINGLE entry when dictation stops.
+        session_parts: list[str] = []
+        session_start = time.time()
+        # Open one continuous mic stream for the whole session so audio keeps
+        # buffering during ASR (no dropped packets between windows).
+        self._pipeline.start_capture()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    text, _duration = self._pipeline.process(
+                        capture_seconds=3.0,
+                        stop_event=self._stop_event,
+                    )
+                except Exception as exc:  # pragma: no cover - runtime guard
+                    print(f"[Betaal][hotkey] Dictation loop error: {exc}")
                     continue
-                self._key_queue.put(text)
-                words = len(text.split())
-                db_manager.log_entry(words, duration)
-            except Exception as exc:  # pragma: no cover - defensive runtime guard
-                print(f"[Betaal][hotkey] Dictation loop error: {exc}")
+                if text:
+                    self._key_queue.put(text)  # live-inject into the focused app
+                    session_parts.append(text)
+        finally:
+            self._pipeline.stop_capture()
+
+        self._finalize_session(session_parts, time.time() - session_start)
+
+    def _finalize_session(self, parts, duration):
+        """Log the whole session as one entry once dictation has stopped."""
+        full_text = " ".join(p for p in parts if p).strip()
+        if not full_text:
+            return
+        words = len(full_text.split())
+        db_manager.log_entry(words, duration, text=full_text)
+        if self._on_note is not None:
+            try:
+                self._on_note(full_text, words, duration)
+            except Exception as exc:  # pragma: no cover - callback guard
+                print(f"[Betaal][hotkey] on_note callback failed: {exc}")
+
+    def _emit_state(self, recording):
+        if self._on_state is not None:
+            try:
+                self._on_state(recording)
+            except Exception as exc:  # pragma: no cover - callback guard
+                print(f"[Betaal][hotkey] on_state callback failed: {exc}")
 
     def _on_trigger(self):
         with self._state_lock:
@@ -83,12 +121,23 @@ class HotkeyListener:
             if active:
                 self._stop_event.set()
                 print("[Betaal] Dictation stopped")
+                self._emit_state(False)
                 return
 
             self._stop_event.clear()
             self._dictation_thread = threading.Thread(target=self._dictation_loop, daemon=True)
             self._dictation_thread.start()
             print("[Betaal] Dictation started")
+            self._emit_state(True)
+
+    def toggle(self):
+        """Programmatically start/stop dictation (same as pressing the hotkey)."""
+        self._on_trigger()
+
+    def is_recording(self):
+        """Return True when the dictation loop is currently active."""
+        with self._state_lock:
+            return self._dictation_thread is not None and self._dictation_thread.is_alive()
 
     def _run(self):
         try:

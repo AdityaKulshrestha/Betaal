@@ -9,7 +9,6 @@ description = "Offline Windows dictation prototype with hotkey-driven text injec
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "customtkinter>=5.2.0",
     "huggingface_hub>=0.24.0",
     "keyboard>=0.13.5",
     "librosa>=0.10.0",
@@ -18,7 +17,7 @@ dependencies = [
     "openvino>=2024.3.0",
     "openvino-genai>=2024.3.0",
     "pyperclip>=1.9.0",
-    "silero-vad>=5.1.2",
+    "PySide6>=6.6.0",
     "sounddevice>=0.4.7",
     "transformers>=4.44.0",
 ]
@@ -30,4 +29,4 @@ betaal = "main:main"
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-include = ["core*", "database*", "gui*"]
+include = ["core*", "database*", "desktop*"]

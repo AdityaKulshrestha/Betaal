@@ -1,6 +1,8 @@
 {
   "hotkey": "ctrl+shift+space",
-  "vad_threshold": 0.5,
-  "asr_model": "Local Base",
-  "log_transcript": true
+  "vad_threshold": 0.35,
+  "asr_model": "Cohere-transcribe",
+  "asr_device": "CPU",
+  "log_transcript": true,
+  "user_name": "Aditya"
 }
