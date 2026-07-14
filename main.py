@@ -34,12 +34,16 @@ def headless():
         log_transcript=config["log_transcript"],
         min_silence_ms=config["min_silence_ms"],
         max_segment_seconds=config["max_segment_seconds"],
+        reformat_hotkey=config["reformat_hotkey"],
+        llm_model=config["llm_model"],
+        llm_device=config["llm_device"],
+        reformat_prompt=config["reformat_prompt"],
     )
     listener.start()
 
     print(
         f"[Betaal] Running headless. Hotkey: {config['hotkey']}. "
-        "Press Ctrl+C to quit."
+        f"Reformat: {config['reformat_hotkey']}. Press Ctrl+C to quit."
     )
     try:
         threading.Event().wait()

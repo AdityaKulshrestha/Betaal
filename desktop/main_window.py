@@ -29,13 +29,19 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSystemTrayIcon,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from core.config_store import load_config, save_config
 from core.hotkey_listener import HotkeyListener
-from core.model_registry import DEFAULT_MODEL_DISPLAY, list_model_names
+from core.model_registry import (
+    DEFAULT_LLM_DISPLAY,
+    DEFAULT_MODEL_DISPLAY,
+    list_llm_model_names,
+    list_model_names,
+)
 from core.processor import available_devices
 from core import speaker
 from database import db_manager
@@ -52,7 +58,7 @@ _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ICON_PNG = os.path.join(_BASE_DIR, "assets", "betaal.png")
 _ICON_ICO = os.path.join(_BASE_DIR, "assets", "betaal.ico")
 
-_PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds"}
+_PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds", "reformat_hotkey", "llm_model", "llm_device", "reformat_prompt"}
 
 
 def _initials(name: str) -> str:
@@ -101,6 +107,7 @@ class EngineBridge(QObject):
     busy = Signal(str)
     error = Signal(str)
     speakers_changed = Signal()
+    llm_state = Signal(str)
 
 
 class MainWindow(QMainWindow):
@@ -137,6 +144,7 @@ class MainWindow(QMainWindow):
         self._bridge.busy.connect(self._on_busy)
         self._bridge.error.connect(self._on_error)
         self._bridge.speakers_changed.connect(self._reload_speakers)
+        self._bridge.llm_state.connect(self._on_llm_state)
 
         self._build_tray()
         self._refresh_stats()
@@ -197,6 +205,10 @@ class MainWindow(QMainWindow):
         self._build_speaker_section(self._speaker_section)
         outer.addWidget(self._speaker_section)
 
+        self._reformat_section = CollapsibleSection("\u270e", "Reformatter (LLM)")
+        self._build_reformat_section(self._reformat_section)
+        outer.addWidget(self._reformat_section)
+
         outer.addStretch(1)
 
         # footer: hotkey
@@ -222,6 +234,7 @@ class MainWindow(QMainWindow):
             self._model_section,
             self._vad_section,
             self._speaker_section,
+            self._reformat_section,
         ]
         return bar
 
@@ -308,6 +321,86 @@ class MainWindow(QMainWindow):
         section.add_widget(holder)
 
         hint = QLabel("Record a short sample per person for speaker identification.")
+        hint.setProperty("class", "Hint")
+        hint.setWordWrap(True)
+        section.add_widget(hint)
+
+    def _build_reformat_section(self, section: CollapsibleSection) -> None:
+        # LLM status
+        status_row = QHBoxLayout()
+        status_lbl = QLabel("Model status")
+        status_lbl.setProperty("class", "FieldLabel")
+        self._llm_status = QLabel("Not loaded")
+        self._llm_status.setProperty("class", "FieldValue")
+        self._llm_status.setAlignment(Qt.AlignRight)
+        status_row.addWidget(status_lbl)
+        status_row.addWidget(self._llm_status)
+        status_wrap = QWidget()
+        status_wrap.setLayout(status_row)
+        section.add_widget(status_wrap)
+
+        # LLM model
+        model_lbl = QLabel("LLM model")
+        model_lbl.setProperty("class", "FieldLabel")
+        section.add_widget(model_lbl)
+
+        self._llm_combo = QComboBox()
+        llm_models = list_llm_model_names()
+        current_llm = self._config.get("llm_model", DEFAULT_LLM_DISPLAY)
+        if current_llm not in llm_models:
+            llm_models = [current_llm, *llm_models]
+        self._llm_combo.addItems(llm_models)
+        self._llm_combo.setCurrentText(current_llm)
+        self._llm_combo.currentTextChanged.connect(self._on_llm_model_changed)
+        section.add_widget(self._llm_combo)
+
+        # LLM device
+        dev_lbl = QLabel("Compute device")
+        dev_lbl.setProperty("class", "FieldLabel")
+        section.add_widget(dev_lbl)
+
+        self._llm_device_combo = QComboBox()
+        devices = available_devices()
+        current_dev = self._config.get("llm_device", "CPU")
+        if current_dev not in devices:
+            devices = [current_dev, *devices]
+        self._llm_device_combo.addItems(devices)
+        self._llm_device_combo.setCurrentText(current_dev)
+        self._llm_device_combo.currentTextChanged.connect(self._on_llm_device_changed)
+        section.add_widget(self._llm_device_combo)
+
+        # Reformat hotkey
+        hk_lbl = QLabel("Reformat hotkey")
+        hk_lbl.setProperty("class", "FieldLabel")
+        section.add_widget(hk_lbl)
+
+        self._reformat_hotkey_edit = QLineEdit(
+            self._config.get("reformat_hotkey", "ctrl+shift+f")
+        )
+        self._reformat_hotkey_edit.setPlaceholderText("ctrl+shift+f")
+        self._reformat_hotkey_edit.returnPressed.connect(self._apply_reformat_hotkey)
+        section.add_widget(self._reformat_hotkey_edit)
+
+        # Formatting prompt
+        prompt_lbl = QLabel("Formatting prompt")
+        prompt_lbl.setProperty("class", "FieldLabel")
+        section.add_widget(prompt_lbl)
+
+        self._prompt_edit = QTextEdit()
+        self._prompt_edit.setPlainText(self._config.get("reformat_prompt", ""))
+        self._prompt_edit.setFixedHeight(96)
+        section.add_widget(self._prompt_edit)
+
+        apply_btn = QPushButton("Apply reformatter settings")
+        apply_btn.setProperty("class", "Ghost")
+        apply_btn.setCursor(Qt.PointingHandCursor)
+        apply_btn.clicked.connect(self._apply_reformat_settings)
+        section.add_widget(apply_btn)
+
+        hint = QLabel(
+            "Select text in any app and press the reformat hotkey. Use "
+            "{content} in the prompt as the placeholder for your text."
+        )
         hint.setProperty("class", "Hint")
         hint.setWordWrap(True)
         section.add_widget(hint)
@@ -525,8 +618,13 @@ class MainWindow(QMainWindow):
                     device=device,
                     min_silence_ms=self._config["min_silence_ms"],
                     max_segment_seconds=self._config["max_segment_seconds"],
+                    reformat_hotkey=self._config["reformat_hotkey"],
+                    llm_model=self._config["llm_model"],
+                    llm_device=self._config["llm_device"],
+                    reformat_prompt=self._config["reformat_prompt"],
                     on_note=lambda t, w, d: self._bridge.note.emit(t, w, d),
                     on_state=lambda r: self._bridge.state.emit(r),
+                    on_llm_state=lambda s: self._bridge.llm_state.emit(s),
                 )
                 listener.start()
                 self._listener = listener
@@ -579,6 +677,26 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.setEnabled(enabled)
 
+    @Slot(str)
+    def _on_llm_state(self, status: str) -> None:
+        labels = {
+            "loading": "Loading\u2026",
+            "ready": "Ready",
+            "reformatting": "Reformatting\u2026",
+            "error": "Error",
+            "unloaded": "Not loaded",
+        }
+        colors = {
+            "loading": theme.COLORS["muted"],
+            "ready": theme.COLORS["success"],
+            "reformatting": theme.COLORS["accent"],
+            "error": theme.COLORS["danger"],
+            "unloaded": "#7a8199",
+        }
+        if getattr(self, "_llm_status", None) is not None:
+            self._llm_status.setText(labels.get(status, status))
+            self._llm_status.setStyleSheet(f"color: {colors.get(status, '#7a8199')};")
+
     # ---- config handlers --------------------------------------------------
 
     def _on_model_changed(self, value: str) -> None:
@@ -589,6 +707,25 @@ class MainWindow(QMainWindow):
 
     def _on_log_toggled(self, checked: bool) -> None:
         self._update_config({"log_transcript": bool(checked)})
+
+    def _on_llm_model_changed(self, value: str) -> None:
+        self._update_config({"llm_model": value})
+
+    def _on_llm_device_changed(self, value: str) -> None:
+        self._update_config({"llm_device": value})
+
+    def _apply_reformat_hotkey(self) -> None:
+        text = self._reformat_hotkey_edit.text().strip() or "ctrl+shift+f"
+        self._update_config({"reformat_hotkey": text})
+
+    def _apply_reformat_settings(self) -> None:
+        self._update_config(
+            {
+                "reformat_hotkey": self._reformat_hotkey_edit.text().strip()
+                or "ctrl+shift+f",
+                "reformat_prompt": self._prompt_edit.toPlainText().strip(),
+            }
+        )
 
     def _on_vad_preview(self, value: int) -> None:
         self._vad_value.setText(f"{value / 100:.2f}")

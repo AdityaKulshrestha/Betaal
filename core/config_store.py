@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import os
 
-from core.model_registry import DEFAULT_MODEL_DISPLAY
+from core.model_registry import DEFAULT_LLM_DISPLAY, DEFAULT_MODEL_DISPLAY
+from core.reformatter import DEFAULT_PROMPT
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
@@ -23,6 +24,10 @@ DEFAULT_CONFIG = {
     "user_name": "there",
     "min_silence_ms": 300,
     "max_segment_seconds": 15,
+    "reformat_hotkey": "ctrl+shift+f",
+    "llm_model": DEFAULT_LLM_DISPLAY,
+    "llm_device": "CPU",
+    "reformat_prompt": DEFAULT_PROMPT,
 }
 
 

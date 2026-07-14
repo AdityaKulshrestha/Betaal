@@ -11,13 +11,19 @@ import os
 from urllib.request import urlopen
 from typing import Dict
 
-from core.model_registry import DEFAULT_MODEL_DISPLAY, resolve_backend, resolve_model_id
+from core.model_registry import (
+    DEFAULT_MODEL_DISPLAY,
+    resolve_backend,
+    resolve_llm_model_id,
+    resolve_model_id,
+)
 
 _META_JSON = "ov_cohere_transcribe_kvcache.json"
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(_BASE_DIR, ".models")
 ASR_DIR = os.path.join(MODELS_DIR, "asr")
+LLM_DIR = os.path.join(MODELS_DIR, "llm")
 VAD_DIR = os.path.join(MODELS_DIR, "vad")
 VAD_ONNX_PATH = os.path.join(VAD_DIR, "silero_vad.onnx")
 VAD_ONNX_URL = (
@@ -76,17 +82,18 @@ def _is_complete_whisper_model(model_dir: str) -> bool:
     )
 
 
-def _download_snapshot(repo_id: str, model_dir: str) -> str:
+def _download_snapshot(repo_id: str, model_dir: str, base_dir: str = ASR_DIR,
+                       label: str = "ASR") -> str:
     """Download a full HF repo snapshot into model_dir and return it."""
-    _ensure_dir(ASR_DIR)
+    _ensure_dir(base_dir)
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required to download ASR models."
+            "huggingface_hub is required to download models."
         ) from exc
 
-    print(f"[Betaal][models] Downloading ASR model: {repo_id}")
+    print(f"[Betaal][models] Downloading {label} model: {repo_id}")
     snapshot_download(
         repo_id=repo_id,
         local_dir=model_dir,
@@ -128,6 +135,30 @@ def ensure_vad_model() -> str:
 
     print("[Betaal][models] Downloaded Silero VAD ONNX model from GitHub")
     return VAD_ONNX_PATH
+
+
+def _is_complete_llm_model(model_dir: str) -> bool:
+    """Return True if model_dir holds an OpenVINO GenAI LLM (IR + tokenizer)."""
+    return os.path.isfile(os.path.join(model_dir, "openvino_model.xml")) and (
+        os.path.isfile(os.path.join(model_dir, "openvino_tokenizer.xml"))
+        or os.path.isfile(os.path.join(model_dir, "tokenizer.json"))
+    )
+
+
+def ensure_llm_model(display_name: str) -> str:
+    """Ensure the selected reformatter LLM is present locally and return its folder.
+
+    Mirrors ``ensure_asr_model``: models live under ``.models/llm/<repo>`` (a
+    sibling of ``.models/asr/``) and are fetched with the same snapshot helper.
+    """
+    repo_id = resolve_llm_model_id(display_name)
+    model_dir = os.path.join(LLM_DIR, _safe_repo_name(repo_id))
+
+    for candidate in (model_dir, os.path.join(model_dir, "models")):
+        if _is_complete_llm_model(candidate):
+            return candidate
+
+    return _download_snapshot(repo_id, model_dir, base_dir=LLM_DIR, label="LLM")
 
 
 def ensure_required_models(display_name: str | None = None) -> Dict[str, str]:
