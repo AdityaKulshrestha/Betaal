@@ -32,6 +32,8 @@ def headless():
         model_name=config["asr_model"],
         vad_threshold=config["vad_threshold"],
         log_transcript=config["log_transcript"],
+        min_silence_ms=config["min_silence_ms"],
+        max_segment_seconds=config["max_segment_seconds"],
     )
     listener.start()
 

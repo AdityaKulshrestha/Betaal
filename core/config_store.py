@@ -21,6 +21,8 @@ DEFAULT_CONFIG = {
     "asr_device": "GPU",
     "log_transcript": False,
     "user_name": "there",
+    "min_silence_ms": 300,
+    "max_segment_seconds": 15,
 }
 
 

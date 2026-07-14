@@ -148,6 +148,15 @@ The result is `dist/Betaal/Betaal.exe`. Ship the `.models/` folder alongside it
 (or let it download on first run). Optionally wrap it with Inno Setup and add a
 `Shell:Startup` shortcut so Betaal launches at login.
 
+
+## RoadMap
+- [x] Added cohere model for transcription
+- [x] Added VAD with onnx
+- [x] Changed cohere processor with non-torch dependency
+- [x] Add VAD based chunking
+- [ ] Add check and fallback for GPU to CPU 
+
+
 ## License
 
 Internal / TBD.

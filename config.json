@@ -1,8 +1,10 @@
 {
   "hotkey": "ctrl+shift+space",
-  "vad_threshold": 0.35,
+  "vad_threshold": 0.2,
   "asr_model": "Cohere-transcribe",
-  "asr_device": "CPU",
+  "asr_device": "GPU",
   "log_transcript": true,
-  "user_name": "Aditya"
+  "user_name": "Aditya",
+  "min_silence_ms": 300,
+  "max_segment_seconds": 15
 }

@@ -59,10 +59,13 @@ class SileroVADChunker:
     _WINDOW = 512  # Silero v5 requires exactly 512 samples per frame at 16 kHz
     _CONTEXT = 64  # Silero v5 prepends the last 64 samples of the previous frame
 
-    def __init__(self, model_path: str, sample_rate: int = 16000, threshold: float = 0.5):
+    def __init__(self, model_path: str, sample_rate: int = 16000, threshold: float = 0.5,
+                 min_silence_ms: float = 300.0):
         self._sample_rate = sample_rate
         self._model_path = model_path
         self._threshold = max(0.05, min(0.95, float(threshold)))
+        # Silence gap (ms) that must follow speech before a chunk is closed.
+        self._min_silence = int(sample_rate * max(0.05, float(min_silence_ms) / 1000.0))
         self._session = None
         self._load()
 
@@ -136,7 +139,7 @@ class SileroVADChunker:
         threshold = self._threshold
         neg_threshold = max(0.15, threshold - 0.15)
         min_speech = int(sr * 0.25)    # 250 ms
-        min_silence = int(sr * 0.30)   # 300 ms (lenient)
+        min_silence = self._min_silence  # configurable silence gap
         pad = int(sr * 0.20)           # 200 ms padding (lenient)
         window = self._WINDOW
         total = len(audio)
@@ -168,7 +171,99 @@ class SileroVADChunker:
 
         return [(max(0, s - pad), min(total, e + pad)) for s, e in segments]
 
-    def _energy_fallback(self, audio: np.ndarray) -> list[np.ndarray]:
+    def segment_stream(
+        self, audio: np.ndarray, max_segment_samples: int | None = None
+    ) -> tuple[list[np.ndarray], int]:
+        """Segment a rolling buffer, emitting only *completed* speech segments.
+
+        Unlike :meth:`chunk`, this never cuts speech that is still in progress.
+        A segment is emitted only once trailing silence (>= ``min_silence``) is
+        seen, or once it grows past ``max_segment_samples`` (a safety flush so a
+        never-ending monologue still produces output and the buffer stays
+        bounded).
+
+        Returns ``(chunks, consumed)`` where ``chunks`` are finished speech
+        segments ready for ASR and ``consumed`` is the number of leading samples
+        the caller may drop from its buffer. Samples after ``consumed`` are
+        speech still in progress (or a short pre-roll of silence) and must be
+        retained for the next call.
+        """
+        if audio.size == 0:
+            return [], 0
+        if self._session is None:
+            # No ONNX model -> fall back to whole-buffer energy chunking.
+            return self._energy_fallback(audio), len(audio)
+
+        try:
+            return self._segment_stream_onnx(audio, max_segment_samples)
+        except Exception as exc:  # pragma: no cover - model behavior dependent
+            print(f"[Betaal][vad] ONNX stream VAD failed, fallback mode: {exc}")
+            return self._energy_fallback(audio), len(audio)
+
+    def _segment_stream_onnx(
+        self, audio: np.ndarray, max_segment_samples: int | None
+    ) -> tuple[list[np.ndarray], int]:
+        sr = self._sample_rate
+        threshold = self._threshold
+        neg_threshold = max(0.15, threshold - 0.15)
+        min_speech = int(sr * 0.25)    # 250 ms
+        min_silence = self._min_silence  # configurable silence gap
+        pad = int(sr * 0.20)           # 200 ms padding
+        window = self._WINDOW
+        total = len(audio)
+
+        probs = self._frame_probs(audio)
+        chunks: list[np.ndarray] = []
+        consumed = 0
+        triggered = False
+        current_start = 0
+        temp_end = 0
+
+        for i, prob in enumerate(probs):
+            sample = window * i
+            if prob >= threshold and temp_end:
+                temp_end = 0
+            if prob >= threshold and not triggered:
+                triggered = True
+                current_start = sample
+                continue
+            # Safety flush: a single segment has grown too long -> cut it now.
+            if (
+                triggered
+                and max_segment_samples
+                and (sample - current_start) >= max_segment_samples
+            ):
+                seg_start = max(consumed, current_start - pad)
+                seg_end = min(total, sample + pad)
+                if seg_end > seg_start:
+                    chunks.append(audio[seg_start:seg_end])
+                consumed = sample
+                current_start = sample  # ongoing speech continues as new segment
+                temp_end = 0
+                continue
+            if prob < neg_threshold and triggered:
+                if not temp_end:
+                    temp_end = sample
+                if sample - temp_end < min_silence:
+                    continue
+                if temp_end - current_start > min_speech:
+                    seg_start = max(consumed, current_start - pad)
+                    seg_end = min(total, temp_end + pad)
+                    if seg_end > seg_start:
+                        chunks.append(audio[seg_start:seg_end])
+                consumed = sample
+                temp_end = 0
+                triggered = False
+
+        if triggered:
+            # Speech still ongoing -> retain from its start (keep left-pad).
+            consumed = max(consumed, max(0, current_start - pad))
+        else:
+            # Only silence remains -> drop it but keep a short pre-roll.
+            consumed = max(consumed, total - pad)
+        consumed = max(0, min(consumed, total))
+        return chunks, consumed
+
         frame = int(self._sample_rate * 0.03)
         hop = frame
         threshold = max(0.002, self._threshold * 0.03)
@@ -522,6 +617,18 @@ class AudioCapture:
             return np.empty((0,), dtype=np.float32)
         return np.concatenate(collected).astype(np.float32, copy=False)
 
+    def drain_available(self) -> np.ndarray:
+        """Non-blocking: return all audio currently queued (may be empty)."""
+        collected = []
+        try:
+            while True:
+                collected.append(self._frame_queue.get_nowait())
+        except queue.Empty:
+            pass
+        if not collected:
+            return np.empty((0,), dtype=np.float32)
+        return np.concatenate(collected).astype(np.float32, copy=False)
+
 
 class TextPipeline:
     """Queue-based low-overhead speech pipeline.
@@ -530,12 +637,21 @@ class TextPipeline:
         mic stream -> silero vad chunks -> asr queue -> merged text
     """
 
+    # How much audio to pull from the mic per loop iteration. This only sets
+    # responsiveness/latency granularity -- chunk *boundaries* come from VAD.
+    _READ_SECONDS = 0.5
+    # Safety cap so a non-stop monologue still flushes and the buffer stays
+    # bounded (segments are normally cut on silence, not on length).
+    _MAX_SEGMENT_SECONDS = 15.0
+
     def __init__(
         self,
         model_display_name: str,
         vad_threshold: float = 0.5,
         log_transcript: bool = False,
         device: str = "GPU",
+        min_silence_ms: float = 300.0,
+        max_segment_seconds: float | None = None,
     ):
         self._model_display_name = model_display_name
         self._log_transcript = log_transcript
@@ -546,14 +662,24 @@ class TextPipeline:
             model_paths["vad_model_path"],
             sample_rate=16000,
             threshold=vad_threshold,
+            min_silence_ms=min_silence_ms,
         )
         if resolve_backend(model_display_name) == "whisper_genai":
             self._asr = WhisperOVBackend(model_paths["asr_model_dir"], device=device)
         else:
             self._asr = OVASRBackend(model_paths["asr_model_dir"], device=device)
 
+        self._sample_rate = 16000
+        max_seconds = (
+            self._MAX_SEGMENT_SECONDS if max_segment_seconds is None
+            else max(1.0, float(max_segment_seconds))
+        )
+        self._max_segment_samples = int(self._sample_rate * max_seconds)
+        self._buffer = np.empty((0,), dtype=np.float32)
+
     def start_capture(self) -> None:
         """Open the continuous microphone stream for a dictation session."""
+        self._buffer = np.empty((0,), dtype=np.float32)
         try:
             self._capture.start()
         except Exception as exc:  # pragma: no cover - device dependent
@@ -562,19 +688,11 @@ class TextPipeline:
     def stop_capture(self) -> None:
         """Close the microphone stream at the end of a dictation session."""
         self._capture.stop()
+        self._buffer = np.empty((0,), dtype=np.float32)
 
-    def process(
-        self,
-        capture_seconds: float = 3.0,
-        stop_event: threading.Event | None = None,
-    ) -> tuple[str, float]:
-        """Capture audio, chunk by VAD, run ASR inline, return merged text + elapsed sec."""
-        start = time.time()
-        audio = self._capture.capture(seconds=capture_seconds, stop_event=stop_event)
-        chunks = self._vad.chunk(audio)
-        if not chunks:
-            return "", time.time() - start
-
+    def _transcribe_chunks(
+        self, chunks: list[np.ndarray], stop_event: threading.Event | None
+    ) -> str:
         parts = []
         for chunk in chunks:
             if stop_event is not None and stop_event.is_set():
@@ -584,8 +702,60 @@ class TextPipeline:
                 parts.append(text)
                 if self._log_transcript:
                     print(f"[Betaal][asr] chunk: {text}")
-
         merged = " ".join(parts).strip()
         if self._log_transcript and merged:
             print(f"[Betaal][asr] transcript: {merged}")
+        return merged
+
+    def process(
+        self,
+        stop_event: threading.Event | None = None,
+    ) -> tuple[str, float]:
+        """Pull a short read window, segment the rolling buffer by VAD silence,
+        transcribe only *completed* segments, and return merged text + elapsed.
+
+        Speech in progress stays buffered across calls, so continuous speech is
+        cut on real pauses (or the max-segment safety cap) -- not on a fixed
+        capture window.
+        """
+        start = time.time()
+        audio = self._capture.capture(seconds=self._READ_SECONDS, stop_event=stop_event)
+        if audio.size:
+            self._buffer = (
+                np.concatenate([self._buffer, audio]) if self._buffer.size else audio
+            )
+        if self._buffer.size == 0:
+            return "", time.time() - start
+
+        chunks, consumed = self._vad.segment_stream(
+            self._buffer, max_segment_samples=self._max_segment_samples
+        )
+        merged = self._transcribe_chunks(chunks, stop_event)
+        if consumed > 0:
+            self._buffer = self._buffer[consumed:]
         return merged, time.time() - start
+
+    def flush(
+        self,
+        stop_event: threading.Event | None = None,
+    ) -> tuple[str, float]:
+        """Drain any remaining audio and transcribe the final in-progress speech.
+
+        Called once when dictation stops so the last utterance (which has no
+        trailing silence) is not lost.
+        """
+        start = time.time()
+        tail = self._capture.drain_available()
+        if tail.size:
+            self._buffer = (
+                np.concatenate([self._buffer, tail]) if self._buffer.size else tail
+            )
+        if self._buffer.size == 0:
+            return "", time.time() - start
+
+        # End of stream == silence, so `chunk` closes the trailing segment.
+        chunks = self._vad.chunk(self._buffer)
+        self._buffer = np.empty((0,), dtype=np.float32)
+        merged = self._transcribe_chunks(chunks, stop_event=None)
+        return merged, time.time() - start
+

@@ -52,7 +52,7 @@ _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ICON_PNG = os.path.join(_BASE_DIR, "assets", "betaal.png")
 _ICON_ICO = os.path.join(_BASE_DIR, "assets", "betaal.ico")
 
-_PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript"}
+_PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds"}
 
 
 def _initials(name: str) -> str:
@@ -523,6 +523,8 @@ class MainWindow(QMainWindow):
                     vad_threshold=self._config["vad_threshold"],
                     log_transcript=self._config["log_transcript"],
                     device=device,
+                    min_silence_ms=self._config["min_silence_ms"],
+                    max_segment_seconds=self._config["max_segment_seconds"],
                     on_note=lambda t, w, d: self._bridge.note.emit(t, w, d),
                     on_state=lambda r: self._bridge.state.emit(r),
                 )

@@ -34,6 +34,8 @@ class HotkeyListener:
         vad_threshold=0.5,
         log_transcript=False,
         device="GPU",
+        min_silence_ms=300.0,
+        max_segment_seconds=None,
         on_note=None,
         on_state=None,
     ):
@@ -44,6 +46,8 @@ class HotkeyListener:
             vad_threshold=vad_threshold,
             log_transcript=log_transcript,
             device=device,
+            min_silence_ms=min_silence_ms,
+            max_segment_seconds=max_segment_seconds,
         )
         self._on_note = on_note
         self._on_state = on_state
@@ -81,7 +85,6 @@ class HotkeyListener:
             while not self._stop_event.is_set():
                 try:
                     text, _duration = self._pipeline.process(
-                        capture_seconds=3.0,
                         stop_event=self._stop_event,
                     )
                 except Exception as exc:  # pragma: no cover - runtime guard
@@ -90,6 +93,14 @@ class HotkeyListener:
                 if text:
                     self._key_queue.put(text)  # live-inject into the focused app
                     session_parts.append(text)
+            # Flush the final in-progress utterance (no trailing silence yet).
+            try:
+                text, _duration = self._pipeline.flush()
+                if text:
+                    self._key_queue.put(text)
+                    session_parts.append(text)
+            except Exception as exc:  # pragma: no cover - runtime guard
+                print(f"[Betaal][hotkey] Dictation flush error: {exc}")
         finally:
             self._pipeline.stop_capture()
 
