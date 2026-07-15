@@ -13,12 +13,14 @@ import threading
 
 from core.model_manager import ensure_llm_model
 
-# Default instruction. ``{content}`` is replaced with the user's selected text.
+# Default instruction. ``{app}`` is replaced with the active application name
+# and ``{content}`` with the user's text.
 DEFAULT_PROMPT = (
-    "Reformat and clean up the following text. Fix grammar, spelling and "
-    "punctuation, and improve clarity while preserving the original meaning "
-    "and language. Return only the reformatted text with no preamble or "
-    "explanation.\n\n{content}"
+    "You are reformatting text that will be pasted into the application: "
+    "{app}. Rewrite it so it fits that application and its typical tone and "
+    "conventions. Fix grammar, spelling and punctuation and improve clarity "
+    "while preserving the original meaning and language. Return only the "
+    "reformatted text with no preamble or explanation.\n\n{content}"
 )
 
 # Load / run status values reported to callers (and the UI).
@@ -79,8 +81,12 @@ class Reformatter:
                 self._error = str(exc)
                 raise
 
-    def reformat(self, content: str) -> str:
-        """Rewrite ``content`` using the configured prompt; returns clean text."""
+    def reformat(self, content: str, app_name: str | None = None) -> str:
+        """Rewrite ``content`` using the configured prompt; returns clean text.
+
+        ``app_name`` is substituted into the prompt's ``{app}`` placeholder so
+        the model can format the output for that application.
+        """
         content = (content or "").strip()
         if not content:
             return ""
@@ -89,7 +95,13 @@ class Reformatter:
 
         import openvino_genai as ov_genai
 
-        prompt = self._prompt.replace("{content}", content)
+        app = app_name or "the current application"
+        prompt = self._prompt.replace("{app}", app)
+        if "{content}" in prompt:
+            prompt = prompt.replace("{content}", content)
+        else:
+            prompt = f"{prompt}\n\n{content}"
+
         gen_config = ov_genai.GenerationConfig()
         gen_config.max_new_tokens = self._max_new_tokens
         # Newer GenAI builds can auto-wrap the prompt in the model's chat

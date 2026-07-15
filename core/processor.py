@@ -264,6 +264,7 @@ class SileroVADChunker:
         consumed = max(0, min(consumed, total))
         return chunks, consumed
 
+    def _energy_fallback(self, audio: np.ndarray) -> list[np.ndarray]:
         frame = int(self._sample_rate * 0.03)
         hop = frame
         threshold = max(0.002, self._threshold * 0.03)
@@ -657,6 +658,13 @@ class TextPipeline:
         self._log_transcript = log_transcript
         model_paths = ensure_required_models(model_display_name)
 
+        self._sample_rate = 16000
+        max_seconds = (
+            self._MAX_SEGMENT_SECONDS if max_segment_seconds is None
+            else max(1.0, float(max_segment_seconds))
+        )
+        self._max_segment_samples = int(self._sample_rate * max_seconds)
+
         self._capture = AudioCapture(sample_rate=16000)
         self._vad = SileroVADChunker(
             model_paths["vad_model_path"],
@@ -669,12 +677,6 @@ class TextPipeline:
         else:
             self._asr = OVASRBackend(model_paths["asr_model_dir"], device=device)
 
-        self._sample_rate = 16000
-        max_seconds = (
-            self._MAX_SEGMENT_SECONDS if max_segment_seconds is None
-            else max(1.0, float(max_segment_seconds))
-        )
-        self._max_segment_samples = int(self._sample_rate * max_seconds)
         self._buffer = np.empty((0,), dtype=np.float32)
 
     def start_capture(self) -> None:

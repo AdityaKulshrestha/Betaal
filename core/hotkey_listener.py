@@ -12,17 +12,19 @@ import time
 import keyboard
 import pyperclip
 
+from core.active_window import active_app_name
 from core.processor import TextPipeline
-from core.reformatter import DEFAULT_PROMPT, Reformatter
+from core.reformatter import Reformatter
 from database import db_manager
 
 # Default combo; overridden by config.json at startup.
 DEFAULT_HOTKEY = "ctrl+shift+space"
 DEFAULT_REFORMAT_HOTKEY = "ctrl+shift+f"
 
-# Paste shortcut used for text injection. Ctrl+Shift+V works in terminals;
-# most other apps also accept it (or fall back to Ctrl+V).
-PASTE_HOTKEY = "ctrl+shift+v"
+# Paste shortcut used for text injection. Plain Ctrl+V is accepted by virtually
+# every app; Ctrl+Shift+V is not a paste shortcut in some apps (e.g. Outlook),
+# which reject it with a warning beep and no paste.
+PASTE_HOTKEY = "ctrl+v"
 
 
 class HotkeyListener:
@@ -41,7 +43,6 @@ class HotkeyListener:
         reformat_hotkey=DEFAULT_REFORMAT_HOTKEY,
         llm_model="LFM2.5 350M",
         llm_device="CPU",
-        reformat_prompt=None,
         on_note=None,
         on_state=None,
         on_llm_state=None,
@@ -60,7 +61,6 @@ class HotkeyListener:
         self._reformatter = Reformatter(
             model_display_name=llm_model,
             device=llm_device,
-            prompt=reformat_prompt or DEFAULT_PROMPT,
         )
         self._on_note = on_note
         self._on_state = on_state
@@ -169,6 +169,27 @@ class HotkeyListener:
             self._reformat_busy = True
         threading.Thread(target=self._reformat_worker, daemon=True).start()
 
+    @staticmethod
+    def _wait_modifiers_released(timeout=1.5):
+        """Wait for the user to let go of the hotkey modifier keys.
+
+        The reformat hotkey (e.g. ctrl+shift+f) means Ctrl/Shift are still held
+        when the handler fires. Sending synthetic Ctrl+A / Ctrl+C / Ctrl+V while
+        they are down (a) merges into the wrong combo so nothing is copied
+        ("No text selected"), and (b) desyncs the OS modifier state, which stops
+        later global hotkeys (dictation) from firing. Waiting for release fixes
+        both.
+        """
+        mods = ("ctrl", "shift", "alt", "left windows", "right windows")
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if not any(keyboard.is_pressed(m) for m in mods):
+                    return
+            except Exception:
+                return
+            time.sleep(0.02)
+
     def _reformat_worker(self):
         original = None
         try:
@@ -177,26 +198,39 @@ class HotkeyListener:
                 self._reformatter.load()
                 self._emit_llm_state("ready")
 
-            # Grab the current selection: clear the clipboard, copy, then read.
+            # Capture which app is focused BEFORE we touch the clipboard, so the
+            # LLM can align its output to that app (mail, editor, etc.).
+            app_name = active_app_name()
+
+            # Wait for the hotkey modifiers to be released so our synthetic
+            # Ctrl+A/C/V are clean and don't leave modifiers stuck (which would
+            # break the dictation hotkey afterwards).
+            self._wait_modifiers_released()
+
+            # Capture the entire text on screen: select all, then copy.
             original = pyperclip.paste()
             pyperclip.copy("")
+            keyboard.send("ctrl+a")
+            time.sleep(0.05)
             keyboard.send("ctrl+c")
             time.sleep(0.15)
             content = pyperclip.paste()
             if not content.strip():
-                print("[Betaal][reformat] No text selected; nothing to reformat")
+                print("[Betaal][reformat] No text captured; nothing to reformat")
                 pyperclip.copy(original)
                 self._emit_llm_state("ready")
                 return
 
             self._emit_llm_state("reformatting")
-            result = self._reformatter.reformat(content)
+            result = self._reformatter.reformat(content, app_name=app_name)
             if result:
                 pyperclip.copy(result)
+                keyboard.send("ctrl+a")  # reselect all so paste replaces it
+                time.sleep(0.05)
                 keyboard.send(PASTE_HOTKEY)
                 time.sleep(0.05)
                 pyperclip.copy(original)  # restore the user's clipboard
-                print("[Betaal] Reformatted selection")
+                print(f"[Betaal] Reformatted screen text (app: {app_name or 'unknown'})")
             else:
                 pyperclip.copy(original)
             self._emit_llm_state("ready")

@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSystemTrayIcon,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -58,7 +57,7 @@ _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ICON_PNG = os.path.join(_BASE_DIR, "assets", "betaal.png")
 _ICON_ICO = os.path.join(_BASE_DIR, "assets", "betaal.ico")
 
-_PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds", "reformat_hotkey", "llm_model", "llm_device", "reformat_prompt"}
+_PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds", "reformat_hotkey", "llm_model", "llm_device"}
 
 
 def _initials(name: str) -> str:
@@ -381,25 +380,15 @@ class MainWindow(QMainWindow):
         self._reformat_hotkey_edit.returnPressed.connect(self._apply_reformat_hotkey)
         section.add_widget(self._reformat_hotkey_edit)
 
-        # Formatting prompt
-        prompt_lbl = QLabel("Formatting prompt")
-        prompt_lbl.setProperty("class", "FieldLabel")
-        section.add_widget(prompt_lbl)
-
-        self._prompt_edit = QTextEdit()
-        self._prompt_edit.setPlainText(self._config.get("reformat_prompt", ""))
-        self._prompt_edit.setFixedHeight(96)
-        section.add_widget(self._prompt_edit)
-
-        apply_btn = QPushButton("Apply reformatter settings")
+        apply_btn = QPushButton("Apply reformat hotkey")
         apply_btn.setProperty("class", "Ghost")
         apply_btn.setCursor(Qt.PointingHandCursor)
-        apply_btn.clicked.connect(self._apply_reformat_settings)
+        apply_btn.clicked.connect(self._apply_reformat_hotkey)
         section.add_widget(apply_btn)
 
         hint = QLabel(
-            "Select text in any app and press the reformat hotkey. Use "
-            "{content} in the prompt as the placeholder for your text."
+            "Press the reformat hotkey to rewrite all text in the focused app "
+            "using the selected LLM."
         )
         hint.setProperty("class", "Hint")
         hint.setWordWrap(True)
@@ -621,7 +610,6 @@ class MainWindow(QMainWindow):
                     reformat_hotkey=self._config["reformat_hotkey"],
                     llm_model=self._config["llm_model"],
                     llm_device=self._config["llm_device"],
-                    reformat_prompt=self._config["reformat_prompt"],
                     on_note=lambda t, w, d: self._bridge.note.emit(t, w, d),
                     on_state=lambda r: self._bridge.state.emit(r),
                     on_llm_state=lambda s: self._bridge.llm_state.emit(s),
@@ -717,15 +705,6 @@ class MainWindow(QMainWindow):
     def _apply_reformat_hotkey(self) -> None:
         text = self._reformat_hotkey_edit.text().strip() or "ctrl+shift+f"
         self._update_config({"reformat_hotkey": text})
-
-    def _apply_reformat_settings(self) -> None:
-        self._update_config(
-            {
-                "reformat_hotkey": self._reformat_hotkey_edit.text().strip()
-                or "ctrl+shift+f",
-                "reformat_prompt": self._prompt_edit.toPlainText().strip(),
-            }
-        )
 
     def _on_vad_preview(self, value: int) -> None:
         self._vad_value.setText(f"{value / 100:.2f}")

@@ -9,6 +9,5 @@
   "max_segment_seconds": 15,
   "reformat_hotkey": "ctrl+shift+f",
   "llm_model": "LFM2.5 350M",
-  "llm_device": "CPU",
-  "reformat_prompt": "Reformat and clean up the following text. Fix grammar, spelling and punctuation, and improve clarity while preserving the original meaning and language. Return only the reformatted text with no preamble or explanation.\n\n{content}"
+  "llm_device": "CPU"
 }

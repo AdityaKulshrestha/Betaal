@@ -37,7 +37,6 @@ def headless():
         reformat_hotkey=config["reformat_hotkey"],
         llm_model=config["llm_model"],
         llm_device=config["llm_device"],
-        reformat_prompt=config["reformat_prompt"],
     )
     listener.start()
 
