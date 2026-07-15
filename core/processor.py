@@ -314,6 +314,7 @@ class OVASRBackend:
         self._ctx = None
         self._sample_rate = 16000
         self._max_new_tokens = 200
+        self._warmup_samples = self._sample_rate
         # Self-attention KV-cache guard: never let the decode cache grow past
         # ``max_kv_tokens``; when it does, evict the oldest tokens so only the
         # most recent ``(1 - kv_evict_ratio)`` fraction is kept (sliding window).
@@ -477,10 +478,24 @@ class OVASRBackend:
 
     def _load(self) -> None:
         if self._load_ctx(self._device):
+            self._warmup_once()
             return
         if self._device != "CPU" and self._load_ctx("CPU"):
+            self._warmup_once()
             return
         print("[Betaal][asr] ASR backend unavailable after KV-cache init attempts")
+
+    def _warmup_once(self) -> None:
+        """Prime one-off frontend/runtime lazy paths before user inference."""
+        if self._ctx is None:
+            return
+        warmup_audio = np.zeros((self._warmup_samples,), dtype=np.float32)
+        start = time.time()
+        try:
+            self._transcribe(warmup_audio)
+            print(f"[Betaal][asr] Warmup completed in {time.time() - start:.2f}s")
+        except Exception as exc:  # pragma: no cover - model/runtime dependent
+            print(f"[Betaal][asr] Warmup failed: {exc}")
 
     def transcribe(self, audio_chunk: np.ndarray) -> str:
         if audio_chunk.size == 0:
