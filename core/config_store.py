@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     "user_name": "there",
     "min_silence_ms": 300,
     "max_segment_seconds": 15,
-    "reformat_hotkey": "ctrl+shift+f",
+    "reformat_hotkey": "ctrl+alt+r",
     "llm_model": DEFAULT_LLM_DISPLAY,
     "llm_device": "CPU",
 }

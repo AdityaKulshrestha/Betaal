@@ -374,9 +374,9 @@ class MainWindow(QMainWindow):
         section.add_widget(hk_lbl)
 
         self._reformat_hotkey_edit = QLineEdit(
-            self._config.get("reformat_hotkey", "ctrl+shift+f")
+            self._config.get("reformat_hotkey", "ctrl+alt+r")
         )
-        self._reformat_hotkey_edit.setPlaceholderText("ctrl+shift+f")
+        self._reformat_hotkey_edit.setPlaceholderText("ctrl+alt+r")
         self._reformat_hotkey_edit.returnPressed.connect(self._apply_reformat_hotkey)
         section.add_widget(self._reformat_hotkey_edit)
 
@@ -703,7 +703,7 @@ class MainWindow(QMainWindow):
         self._update_config({"llm_device": value})
 
     def _apply_reformat_hotkey(self) -> None:
-        text = self._reformat_hotkey_edit.text().strip() or "ctrl+shift+f"
+        text = self._reformat_hotkey_edit.text().strip() or "ctrl+alt+r"
         self._update_config({"reformat_hotkey": text})
 
     def _on_vad_preview(self, value: int) -> None:

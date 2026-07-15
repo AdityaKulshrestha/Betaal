@@ -117,4 +117,26 @@ class Reformatter:
                 result = self._pipe.generate(prompt, gen_config)
             finally:
                 self._status = STATUS_READY
-        return str(result).strip()
+        return self._clean_output(str(result), built_prompt=prompt, content=content)
+
+    def _clean_output(self, text: str, built_prompt: str, content: str) -> str:
+        """Guard against the model echoing the instruction instead of rewriting.
+
+        Small models (e.g. LFM2.5-350M) sometimes regurgitate the prompt rather
+        than following it -- especially on long / rich-text input such as an
+        email body (signatures, quoted threads, etc.). We must never paste the
+        instruction back, so if the output is (or starts with) the instruction,
+        discard it and return "" -- the caller then leaves the original text
+        untouched instead of replacing it with the prompt.
+        """
+        text = (text or "").strip()
+        if not text:
+            return ""
+        # The instruction is the built prompt with the user's content removed.
+        instruction = " ".join(built_prompt.replace(content, " ").split()).lower()
+        if instruction:
+            norm_text = " ".join(text.split()).lower()
+            head = instruction[:60]
+            if head and (instruction in norm_text or norm_text.startswith(head)):
+                return ""
+        return text

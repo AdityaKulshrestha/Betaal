@@ -19,12 +19,19 @@ from database import db_manager
 
 # Default combo; overridden by config.json at startup.
 DEFAULT_HOTKEY = "ctrl+shift+space"
-DEFAULT_REFORMAT_HOTKEY = "ctrl+shift+f"
+DEFAULT_REFORMAT_HOTKEY = "ctrl+alt+r"
 
 # Paste shortcut used for text injection. Plain Ctrl+V is accepted by virtually
 # every app; Ctrl+Shift+V is not a paste shortcut in some apps (e.g. Outlook),
 # which reject it with a warning beep and no paste.
 PASTE_HOTKEY = "ctrl+v"
+
+# How long to wait after Ctrl+V before restoring the previous clipboard. Slow
+# apps (Outlook) read the clipboard asynchronously; restoring too early makes
+# them paste the STALE previous content instead of the injected text. This runs
+# on the background key thread *after* the paste, so it never delays how fast
+# text appears to the user.
+PASTE_SETTLE_SECONDS = 0.25
 
 
 class HotkeyListener:
@@ -81,13 +88,32 @@ class HotkeyListener:
             if not text:
                 continue
             try:
-                previous = pyperclip.paste()
+                # Inject the chunk via clipboard paste. We deliberately do NOT
+                # restore the clipboard here: doing so per-chunk both races the
+                # target app's async paste (slow apps like Outlook then paste the
+                # stale previous clipboard) and serialises the key thread, making
+                # dictation laggy. The original clipboard is saved once at session
+                # start and restored once when dictation stops.
                 pyperclip.copy(text + " ")
                 keyboard.send(PASTE_HOTKEY)
-                time.sleep(0.05)
-                pyperclip.copy(previous)
+                time.sleep(0.02)  # brief spacing so consecutive pastes land in order
             except Exception as exc:  # pragma: no cover - runtime guard
                 print(f"[Betaal][hotkey] Clipboard paste failed: {exc}")
+
+    def _restore_clipboard(self, saved: str):
+        """Restore the pre-session clipboard, once all chunks have been pasted.
+
+        Waits for the injection queue to drain and the final paste to settle so
+        we never overwrite the clipboard before the target app has read it.
+        """
+        deadline = time.time() + 3.0
+        while not self._key_queue.empty() and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(PASTE_SETTLE_SECONDS)  # let the last paste be consumed
+        try:
+            pyperclip.copy(saved)
+        except Exception as exc:  # pragma: no cover - clipboard backend dependent
+            print(f"[Betaal][hotkey] Clipboard restore failed: {exc}")
 
     def _dictation_loop(self):
         # One "session" spans a full hotkey press -> press cycle. We inject each
@@ -95,6 +121,12 @@ class HotkeyListener:
         # whole session and log a SINGLE entry when dictation stops.
         session_parts: list[str] = []
         session_start = time.time()
+        # Snapshot the user's clipboard once; restored after the session ends so
+        # live injection never races a per-chunk restore.
+        try:
+            saved_clipboard = pyperclip.paste()
+        except Exception:  # pragma: no cover - clipboard backend dependent
+            saved_clipboard = ""
         # Open one continuous mic stream for the whole session so audio keeps
         # buffering during ASR (no dropped packets between windows).
         self._pipeline.start_capture()
@@ -120,6 +152,7 @@ class HotkeyListener:
                 print(f"[Betaal][hotkey] Dictation flush error: {exc}")
         finally:
             self._pipeline.stop_capture()
+            self._restore_clipboard(saved_clipboard)
 
         self._finalize_session(session_parts, time.time() - session_start)
 
@@ -173,7 +206,7 @@ class HotkeyListener:
     def _wait_modifiers_released(timeout=1.5):
         """Wait for the user to let go of the hotkey modifier keys.
 
-        The reformat hotkey (e.g. ctrl+shift+f) means Ctrl/Shift are still held
+        The reformat hotkey (e.g. ctrl+alt+r) means its modifiers are still held
         when the handler fires. Sending synthetic Ctrl+A / Ctrl+C / Ctrl+V while
         they are down (a) merges into the wrong combo so nothing is copied
         ("No text selected"), and (b) desyncs the OS modifier state, which stops
@@ -228,7 +261,7 @@ class HotkeyListener:
                 keyboard.send("ctrl+a")  # reselect all so paste replaces it
                 time.sleep(0.05)
                 keyboard.send(PASTE_HOTKEY)
-                time.sleep(0.05)
+                time.sleep(PASTE_SETTLE_SECONDS)
                 pyperclip.copy(original)  # restore the user's clipboard
                 print(f"[Betaal] Reformatted screen text (app: {app_name or 'unknown'})")
             else:

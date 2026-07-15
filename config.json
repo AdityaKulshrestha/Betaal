@@ -7,7 +7,7 @@
   "user_name": "Aditya",
   "min_silence_ms": 300,
   "max_segment_seconds": 15,
-  "reformat_hotkey": "ctrl+shift+f",
+  "reformat_hotkey": "ctrl+alt+r",
   "llm_model": "LFM2.5 350M",
   "llm_device": "CPU"
 }
