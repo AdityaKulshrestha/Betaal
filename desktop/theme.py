@@ -40,10 +40,12 @@ def stylesheet() -> str:
     QLabel#BrandName {{
         font-size: 17px;
         font-weight: 700;
+        padding: 2px 0;
     }}
     QLabel#BrandSub {{
         font-size: 11px;
         color: {c['muted']};
+        padding: 1px 0;
     }}
     QLabel#BrandMark {{
         background: {c['accent']};
@@ -56,6 +58,7 @@ def stylesheet() -> str:
         font-size: 10px;
         color: {c['muted']};
         letter-spacing: 1px;
+        padding: 4px 0;
     }}
 
     /* section header toggle */
@@ -83,15 +86,18 @@ def stylesheet() -> str:
     QLabel.FieldLabel {{
         font-size: 12px;
         color: {c['muted']};
+        padding: 2px 0;
     }}
     QLabel.FieldValue {{
         font-size: 12px;
         font-weight: 700;
         color: {c['text']};
+        padding: 2px 0;
     }}
     QLabel.Hint {{
         font-size: 11px;
         color: {c['muted']};
+        padding: 1px 0;
     }}
 
     /* ---- header ---- */
@@ -105,10 +111,12 @@ def stylesheet() -> str:
     QLabel#Greeting {{
         font-size: 23px;
         font-weight: 700;
+        padding: 4px 0;
     }}
     QLabel#DateLine {{
         font-size: 13px;
         color: {c['muted']};
+        padding: 2px 0;
     }}
     QFrame#StatusChip {{
         background: {c['surface2']};
@@ -118,6 +126,7 @@ def stylesheet() -> str:
     QLabel#StatusText {{
         font-size: 12px;
         color: {c['text_dim']};
+        padding: 2px 0;
     }}
     QFrame#HotkeyHint {{
         background: {c['surface2']};
@@ -127,6 +136,7 @@ def stylesheet() -> str:
     QLabel#HintText {{
         font-size: 12px;
         color: {c['text_dim']};
+        padding: 2px 0;
     }}
     QLabel.Kbd {{
         background: {c['surface3']};
@@ -144,6 +154,7 @@ def stylesheet() -> str:
         color: {c['muted']};
         letter-spacing: 1px;
         font-weight: 600;
+        padding: 3px 0;
     }}
     QLabel#CountPill {{
         font-size: 11px;
@@ -168,15 +179,18 @@ def stylesheet() -> str:
     QLabel.MetricValue {{
         font-size: 27px;
         font-weight: 800;
+        padding: 4px 0;
     }}
     QLabel.MetricUnit {{
         font-size: 13px;
         font-weight: 600;
         color: {c['muted']};
+        padding: 3px 0;
     }}
     QLabel.MetricLabel {{
         font-size: 12px;
         color: {c['muted']};
+        padding: 2px 0;
     }}
 
     /* ---- note cards ---- */
@@ -193,19 +207,23 @@ def stylesheet() -> str:
     QLabel.NoteText {{
         font-size: 14px;
         color: {c['text']};
+        padding: 2px 0;
     }}
     QLabel.NoteMeta {{
         font-size: 11px;
         color: {c['muted']};
+        padding: 1px 0;
     }}
     QLabel#EmptyTitle {{
         font-size: 15px;
         font-weight: 600;
         color: {c['text_dim']};
+        padding: 3px 0;
     }}
     QLabel#EmptyBody {{
         font-size: 12px;
         color: {c['muted']};
+        padding: 2px 0;
     }}
     QFrame#EmptyState {{
         border: 1px dashed {c['border']};
@@ -255,6 +273,16 @@ def stylesheet() -> str:
         color: {c['text_dim']};
     }}
     QPushButton.Ghost:hover {{ border: 1px solid {c['accent']}; color: {c['text']}; }}
+
+    QPushButton.DangerGhost {{
+        background: {c['surface3']};
+        border: 1px solid {c['border']};
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: {c['danger']};
+    }}
+    QPushButton.DangerGhost:hover {{ background: {c['danger']}; border: 1px solid {c['danger']}; color: #ffffff; }}
 
     QPushButton#IconBtn {{
         background: {c['surface3']};
@@ -319,8 +347,8 @@ def stylesheet() -> str:
         border: 1px solid {c['border_soft']};
         border-radius: 9px;
     }}
-    QLabel.SpeakerName {{ font-size: 12px; font-weight: 600; color: {c['text']}; }}
-    QLabel.SpeakerMeta {{ font-size: 11px; color: {c['muted']}; }}
+    QLabel.SpeakerName {{ font-size: 12px; font-weight: 600; color: {c['text']}; padding: 1px 0; }}
+    QLabel.SpeakerMeta {{ font-size: 11px; color: {c['muted']}; padding: 1px 0; }}
 
     /* ---- scroll areas ---- */
     QScrollArea {{ border: none; background: transparent; }}

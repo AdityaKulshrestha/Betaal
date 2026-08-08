@@ -133,6 +133,25 @@ def delete_note(note_id):
         return False
 
 
+def reset_all():
+    """Wipe all analytics + notes rows, resetting usage metrics to zero.
+
+    Schema is preserved (tables are emptied, not dropped) so the app keeps
+    working without needing ``init_db()`` again.
+    """
+    try:
+        with _lock, _connect() as conn:
+            conn.execute("DELETE FROM analytics")
+            conn.execute("DELETE FROM notes")
+            conn.commit()
+        with _lock, _connect() as conn:
+            conn.execute("VACUUM")
+        return True
+    except sqlite3.Error as exc:
+        print(f"[Betaal][db] Failed to reset data: {exc}")
+        return False
+
+
 def get_stats():
     """Return aggregated KPIs for the dashboard.
 

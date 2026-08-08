@@ -23,6 +23,8 @@ currently has focus.
   on a second hotkey (`Ctrl+Alt+R`).
 - Usage analytics (words dictated, time saved, avg daily words) in SQLite.
 - **Fully offline** after a one-time model download on first run.
+- **Reset all data** button in the sidebar to wipe usage metrics and the
+  activity log.
 
 ## How to use
 

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -57,7 +58,6 @@ from desktop.widgets import (
 )
 
 _ICON_PNG = str(paths.asset_path("betaal.png"))
-_ICON_ICO = str(paths.asset_path("betaal.ico"))
 
 _PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds", "reformat_hotkey", "llm_model", "llm_device"}
 
@@ -122,6 +122,11 @@ class MainWindow(QMainWindow):
         self._listener_lock = threading.Lock()
         self._collapsed = False
         self._note_cards: list[NoteCard] = []
+        # Bootup readiness: the main status chip stays in the "loading" state
+        # until BOTH the ASR engine and the reformatter LLM have finished
+        # downloading/compiling, so LLM warm-up is visible, not silent.
+        self._asr_ready = False
+        self._llm_ready = False
 
         self.setObjectName("Root")
         self.setWindowTitle("Betaal")
@@ -236,6 +241,14 @@ class MainWindow(QMainWindow):
         apply_btn.setCursor(Qt.PointingHandCursor)
         apply_btn.clicked.connect(self._apply_hotkey)
         foot_col.addWidget(apply_btn)
+
+        self._reset_btn = QPushButton("\u21bb  Reset all data")
+        self._reset_btn.setProperty("class", "DangerGhost")
+        self._reset_btn.setCursor(Qt.PointingHandCursor)
+        self._reset_btn.setToolTip("Erase usage metrics and the activity log")
+        self._reset_btn.clicked.connect(self._reset_data)
+        foot_col.addWidget(self._reset_btn)
+
         outer.addWidget(self._foot)
 
         return bar
@@ -606,6 +619,8 @@ class MainWindow(QMainWindow):
             model = self._config.get("asr_model", DEFAULT_MODEL_DISPLAY)
             device = self._config.get("asr_device", "GPU")
             _log.info("Building engine: model=%s device=%s", model, device)
+            self._asr_ready = False
+            self._llm_ready = False
             self._bridge.busy.emit(f"Loading {model} on {device}\u2026")
             try:
                 import keyboard
@@ -654,15 +669,13 @@ class MainWindow(QMainWindow):
             self._set_dot(theme.COLORS["danger"])
             self._status_text.setText("Listening")
         else:
-            self._set_dot(theme.COLORS["success"])
-            self._status_text.setText("Idle \u00b7 running in background")
+            self._refresh_engine_status()
 
     @Slot(bool)
     def _on_ready(self, _ready: bool) -> None:
-        self._set_dot(theme.COLORS["success"])
-        self._status_text.setText("Idle \u00b7 running in background")
-        self._loading_bar.setVisible(False)
+        self._asr_ready = True
         self._set_engine_controls_enabled(True)
+        self._refresh_engine_status()
 
     @Slot(str)
     def _on_busy(self, message: str) -> None:
@@ -678,6 +691,24 @@ class MainWindow(QMainWindow):
         self._loading_bar.setVisible(False)
         self._set_engine_controls_enabled(True)
         _log.error("Engine error reported to UI: %s", message)
+
+    def _refresh_engine_status(self) -> None:
+        """Reflect combined ASR + reformatter-LLM readiness in the status chip.
+
+        Keeps the loading indicator visible until the LLM (downloaded/warmed
+        in the background on a separate thread) is also ready, so bootup LLM
+        loading is never silently hidden behind an already-cleared bar.
+        """
+        if not self._asr_ready:
+            return
+        if not self._llm_ready:
+            self._set_dot(theme.COLORS["muted"])
+            self._status_text.setText("Idle \u00b7 warming reformatter LLM\u2026")
+            self._loading_bar.setVisible(True)
+        else:
+            self._set_dot(theme.COLORS["success"])
+            self._status_text.setText("Idle \u00b7 running in background")
+            self._loading_bar.setVisible(False)
 
     def _set_engine_controls_enabled(self, enabled: bool) -> None:
         """Disable model/device switching while the engine is (re)loading."""
@@ -704,6 +735,13 @@ class MainWindow(QMainWindow):
         if getattr(self, "_llm_status", None) is not None:
             self._llm_status.setText(labels.get(status, status))
             self._llm_status.setStyleSheet(f"color: {colors.get(status, '#7a8199')};")
+
+        if status in ("loading",):
+            self._llm_ready = False
+            self._refresh_engine_status()
+        elif status in ("ready", "error"):
+            self._llm_ready = True
+            self._refresh_engine_status()
 
     # ---- config handlers --------------------------------------------------
 
@@ -815,6 +853,26 @@ class MainWindow(QMainWindow):
     def _delete_note(self, note_id: int) -> None:
         if note_id >= 0:
             db_manager.delete_note(note_id)
+        self._load_notes()
+
+    def _reset_data(self) -> None:
+        """Wipe usage metrics + activity log after user confirmation."""
+        reply = QMessageBox.warning(
+            self,
+            "Reset all data",
+            "This permanently erases all usage metrics and the activity log "
+            "(words dictated, time saved, sessions, notes). This cannot be undone.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        if db_manager.reset_all():
+            _log.info("User reset all analytics/notes data")
+        else:
+            _log.error("Failed to reset analytics/notes data")
+        self._refresh_stats()
         self._load_notes()
 
     # ---- sidebar collapse -------------------------------------------------
