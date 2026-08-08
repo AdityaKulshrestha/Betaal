@@ -28,7 +28,9 @@ currently has focus.
 
 ## Demo
 
-<video src="./assets/demo.mp4" controls width="800"></video>
+<video controls width="800">
+  <source src="https://raw.githubusercontent.com/AdityaKulshrestha/Betaal/refs/heads/main/assets/demo.mp4" type="video/mp4">
+</video>
 
 ## How to use
 
