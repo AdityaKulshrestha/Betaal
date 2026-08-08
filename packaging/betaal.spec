@@ -1,15 +1,22 @@
 # PyInstaller spec for Betaal (native PySide6 app + dictation engine).
 #
-# Build (from the Betaal/ folder, inside the project venv):
-#     pyinstaller betaal.spec --noconfirm
+# Do not run this file directly -- use packaging\build.ps1, which is the only
+# entry point for building Betaal (handles the venv, PyInstaller, and the
+# optional Inno Setup installer in one command).
 #
 # Produces a one-directory bundle at dist/Betaal/ with Betaal.exe.
 # Models are NOT bundled: they download + compile into ~/.cache/betaal on first
 # run (or via "Betaal.exe setup"), which the installer triggers post-install.
 
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
+
+# SPECPATH (injected by PyInstaller) is this file's folder: packaging/.
+_PACKAGING_DIR = os.path.abspath(SPECPATH)
+_ROOT = os.path.dirname(_PACKAGING_DIR)
 
 # Heavy native packages whose data files, DLLs and hidden imports PyInstaller's
 # static analysis alone does not fully capture.
@@ -20,6 +27,7 @@ _hiddenimports = []
 for _pkg in (
     "openvino",
     "openvino_genai",
+    "openvino_tokenizers",
     "onnxruntime",
     "librosa",
     "soundfile",
@@ -68,14 +76,14 @@ _hiddenimports += [
 ]
 
 a = Analysis(
-    ["main.py"],
-    pathex=[],
+    [os.path.join(_ROOT, "main.py")],
+    pathex=[_ROOT],
     binaries=_binaries,
-    datas=_datas + [("assets", "assets")],
+    datas=_datas + [(os.path.join(_ROOT, "assets"), "assets")],
     hiddenimports=_hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(_PACKAGING_DIR, "hooks", "rthook_dll_dirs.py")],
     excludes=["torch", "tensorflow", "transformers", "tkinter", "matplotlib"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -97,7 +105,7 @@ exe = EXE(
     upx=False,
     console=False,  # windowed app (no console)
     disable_windowed_traceback=False,
-    icon="assets/betaal.ico",
+    icon=os.path.join(_ROOT, "assets", "betaal.ico"),
 )
 
 coll = COLLECT(

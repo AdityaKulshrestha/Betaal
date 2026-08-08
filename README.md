@@ -113,7 +113,7 @@ uv run python main.py setup     # download + optimize models, then exit
 **2a. Build the standalone app bundle**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 ```
 
 Produces `dist\Betaal\Betaal.exe` — a portable one-directory bundle you can zip
@@ -122,11 +122,11 @@ and copy to another machine.
 **2b. Build the installer**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Installer
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Installer
 ```
 
-Produces `installer\Output\Betaal-Setup-<version>.exe`. The script auto-detects
-`ISCC.exe` from a machine-wide or per-user Inno Setup install.
+Produces `packaging\installer\Output\Betaal-Setup-<version>.exe`. The script
+auto-detects `ISCC.exe` from a machine-wide or per-user Inno Setup install.
 
 > Models are **not** bundled. They download and are optimized (device-specific
 > OpenVINO compile) on the target machine into `%USERPROFILE%\.cache\betaal`.

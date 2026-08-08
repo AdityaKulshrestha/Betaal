@@ -47,9 +47,11 @@ Betaal/
   main.py                   Entry point: native app (default) · headless · setup
   config.json               Persisted user configuration (source runs)
   pyproject.toml            Python package + dependencies
-  betaal.spec               PyInstaller bundle definition
-  scripts/build.ps1         Build the app bundle + optional installer
-  installer/betaal.iss      Inno Setup installer script
+  packaging/                Everything packaging-related (single entry point)
+    build.ps1               Build the app bundle + optional installer
+    betaal.spec             PyInstaller bundle definition
+    hooks/rthook_dll_dirs.py  PyInstaller runtime hook (native DLL search paths)
+    installer/betaal.iss    Inno Setup installer script
   assets/                   App icon (betaal.png / betaal.ico)
   desktop/                  Native PySide6 UI (the app)
     main_window.py          Window: sidebar · dashboard · activity log · tray

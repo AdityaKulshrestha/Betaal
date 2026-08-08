@@ -1,7 +1,11 @@
 ; Inno Setup script for Betaal.
 ;
-; Compile with:  iscc installer\betaal.iss   (run scripts\build.ps1 -Installer)
-; Expects the PyInstaller bundle at ..\dist\Betaal\ (produced by betaal.spec).
+; Do not compile this directly -- use packaging\build.ps1 -Installer, which is
+; the single entry point for building Betaal (venv, PyInstaller bundle, and
+; this installer, in one command).
+;
+; Expects the PyInstaller bundle at ..\..\dist\Betaal\ (produced by
+; packaging\betaal.spec, relative to this file in packaging\installer\).
 ;
 ; Per-user install (no admin required) so the post-install model download/
 ; optimization writes into the installing user's ~/.cache/betaal, and the
@@ -27,7 +31,7 @@ OutputBaseFilename=Betaal-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=..\assets\betaal.ico
+SetupIconFile=..\..\assets\betaal.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -40,7 +44,7 @@ Name: "prepareModels"; Description: "Download and optimize models now (recommend
 
 [Files]
 ; Copy the entire PyInstaller one-directory bundle.
-Source: "..\dist\Betaal\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\..\dist\Betaal\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

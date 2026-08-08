@@ -1,13 +1,13 @@
 <#
-    Betaal Windows build script.
+    Betaal Windows build script -- THE single entry point for packaging Betaal.
 
-    Produces a one-directory PyInstaller bundle at dist/Betaal/.
-    Run from the Betaal/ folder in an activated project venv, or let this
-    script create/use .venv itself.
+    Everything packaging-related lives under packaging/ (this script,
+    betaal.spec, the PyInstaller runtime hook, and the Inno Setup script) so
+    there is exactly one place to look and one command to run.
 
-    Usage:
-        pwsh -File scripts/build.ps1              # build the app bundle
-        pwsh -File scripts/build.ps1 -Installer   # also compile the Inno Setup installer
+    Usage (from anywhere; run this script, don't invoke pyinstaller/iscc by hand):
+        powershell -File packaging\build.ps1              # build the app bundle
+        powershell -File packaging\build.ps1 -Installer    # also build the installer
 
     Requirements:
         - Python 3.10+ and uv (https://docs.astral.sh/uv/)
@@ -15,6 +15,10 @@
 
     Models are NOT bundled. They download + optimize into ~/.cache/betaal on
     first run (or via "Betaal.exe setup", which the installer triggers).
+
+    Output:
+        dist\Betaal\Betaal.exe                        (always)
+        packaging\installer\Output\Betaal-Setup-*.exe (with -Installer)
 #>
 [CmdletBinding()]
 param(
@@ -23,17 +27,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Resolve the project root (parent of this script's folder).
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+# Resolve the project root (parent of this script's folder: packaging\..).
+$PackagingDir = $PSScriptRoot
+$ProjectRoot = Split-Path -Parent $PackagingDir
 Set-Location $ProjectRoot
 Write-Host "[build] Project root: $ProjectRoot"
 
 # 1. Create / sync the virtual environment with runtime deps + PyInstaller.
-if (-not (Test-Path ".venv")) {
-    Write-Host "[build] Creating virtual environment (.venv)..."
-    uv venv
-}
-
 Write-Host "[build] Installing runtime + build dependencies (incl. PyInstaller)..."
 # --extra build pulls PyInstaller as a managed dependency so subsequent syncs
 # don't uninstall it (which previously corrupted altgraph mid-build).
@@ -47,9 +47,10 @@ foreach ($dir in @("build", "dist")) {
     }
 }
 
-# 3. Build the one-directory bundle.
+# 3. Build the one-directory bundle. --distpath/--workpath keep output at the
+# project root regardless of the spec file living under packaging/.
 Write-Host "[build] Running PyInstaller..."
-uv run pyinstaller betaal.spec --noconfirm
+uv run pyinstaller "packaging\betaal.spec" --noconfirm --distpath dist --workpath build
 
 $exePath = Join-Path $ProjectRoot "dist\Betaal\Betaal.exe"
 if (-not (Test-Path $exePath)) {
@@ -59,7 +60,7 @@ Write-Host "[build] Bundle ready: $exePath"
 
 # 4. Optionally compile the installer.
 if ($Installer) {
-    $iss = Join-Path $ProjectRoot "installer\betaal.iss"
+    $iss = Join-Path $PackagingDir "installer\betaal.iss"
     $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
     if ($iscc) {
         $iscc = $iscc.Source
@@ -77,7 +78,7 @@ if ($Installer) {
     }
     Write-Host "[build] Compiling installer with $iscc"
     & $iscc $iss
-    Write-Host "[build] Installer written to installer\Output\"
+    Write-Host "[build] Installer written to packaging\installer\Output\"
 }
 
 Write-Host "[build] Done."

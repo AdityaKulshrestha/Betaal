@@ -9,4 +9,4 @@ tests
 # Packaging artifacts
 build/
 dist/
-installer/Output/
+packaging/installer/Output/
