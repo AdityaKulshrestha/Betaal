@@ -153,14 +153,5 @@ Betaal writes a rotating debug log to
 installed runs). It captures startup, model load/compile, and any errors —
 check it first if the engine fails to start or the UI behaves unexpectedly.
 
-## Roadmap
-
-- [x] Added Cohere model for transcription
-- [x] Added VAD with ONNX
-- [x] Changed Cohere processor with non-torch dependency
-- [x] Add VAD based chunking
-- [x] Add check and fallback for GPU to CPU
-
 ## License
-
-Internal / TBD.
+MIT
