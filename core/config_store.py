@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 import os
 
+from core import paths
 from core.model_registry import DEFAULT_LLM_DISPLAY, DEFAULT_MODEL_DISPLAY
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
+CONFIG_PATH = str(paths.config_path())
 
 DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",

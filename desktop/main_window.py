@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import logging
 from datetime import datetime
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -42,6 +44,7 @@ from core.model_registry import (
     list_model_names,
 )
 from core.processor import available_devices
+from core import paths
 from core import speaker
 from database import db_manager
 from desktop import theme
@@ -53,11 +56,12 @@ from desktop.widgets import (
     kbd,
 )
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_ICON_PNG = os.path.join(_BASE_DIR, "assets", "betaal.png")
-_ICON_ICO = os.path.join(_BASE_DIR, "assets", "betaal.ico")
+_ICON_PNG = str(paths.asset_path("betaal.png"))
+_ICON_ICO = str(paths.asset_path("betaal.ico"))
 
 _PIPELINE_KEYS = {"hotkey", "vad_threshold", "asr_model", "asr_device", "log_transcript", "min_silence_ms", "max_segment_seconds", "reformat_hotkey", "llm_model", "llm_device"}
+
+_log = logging.getLogger("betaal.gui")
 
 
 def _initials(name: str) -> str:
@@ -192,21 +196,26 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._nav_label)
 
         # sections
-        self._model_section = CollapsibleSection("\u25a0", "ASR Model", expanded=True)
-        self._build_model_section(self._model_section)
-        outer.addWidget(self._model_section)
-
-        self._vad_section = CollapsibleSection("\u2261", "VAD Settings")
-        self._build_vad_section(self._vad_section)
-        outer.addWidget(self._vad_section)
-
-        self._speaker_section = CollapsibleSection("\u25c9", "Speaker ID")
-        self._build_speaker_section(self._speaker_section)
-        outer.addWidget(self._speaker_section)
-
-        self._reformat_section = CollapsibleSection("\u270e", "Reformatter (LLM)")
-        self._build_reformat_section(self._reformat_section)
-        outer.addWidget(self._reformat_section)
+        self._sidebar_sections = []
+        section_specs = [
+            ("\u25a0", "ASR Model", True, self._build_model_section),
+            ("\u2261", "VAD Settings", False, self._build_vad_section),
+            ("\u25c9", "Speaker ID", False, self._build_speaker_section),
+            ("\u270e", "Reformatter (LLM)", False, self._build_reformat_section),
+        ]
+        for glyph, title, expanded, builder in section_specs:
+            section = CollapsibleSection(glyph, title, expanded=expanded)
+            try:
+                builder(section)
+            except Exception:
+                # A broken section (e.g. device enumeration failing on some
+                # machines) must not take the rest of the sidebar down with it.
+                _log.exception("Sidebar section %r failed to build", title)
+                err = QLabel("Unavailable \u2014 see logs")
+                err.setProperty("class", "FieldLabel")
+                section.add_widget(err)
+            outer.addWidget(section)
+            self._sidebar_sections.append(section)
 
         outer.addStretch(1)
 
@@ -229,12 +238,6 @@ class MainWindow(QMainWindow):
         foot_col.addWidget(apply_btn)
         outer.addWidget(self._foot)
 
-        self._sidebar_sections = [
-            self._model_section,
-            self._vad_section,
-            self._speaker_section,
-            self._reformat_section,
-        ]
         return bar
 
     def _build_model_section(self, section: CollapsibleSection) -> None:
@@ -448,6 +451,17 @@ class MainWindow(QMainWindow):
         self._status_text.setObjectName("StatusText")
         chip_l.addWidget(self._status_dot)
         chip_l.addWidget(self._status_text)
+        # Indeterminate "busy" bar shown while the engine loads / compiles.
+        self._loading_bar = QProgressBar()
+        self._loading_bar.setObjectName("LoadingBar")
+        self._loading_bar.setRange(0, 0)
+        self._loading_bar.setTextVisible(False)
+        self._loading_bar.setFixedSize(96, 8)
+        self._loading_bar.setStyleSheet(
+            "QProgressBar{border:none;background:#2a2f45;border-radius:4px;}"
+            f"QProgressBar::chunk{{background:{theme.COLORS['accent']};border-radius:4px;}}"
+        )
+        chip_l.addWidget(self._loading_bar)
         row.addWidget(chip)
 
         # hotkey hint
@@ -591,6 +605,7 @@ class MainWindow(QMainWindow):
         with self._listener_lock:
             model = self._config.get("asr_model", DEFAULT_MODEL_DISPLAY)
             device = self._config.get("asr_device", "GPU")
+            _log.info("Building engine: model=%s device=%s", model, device)
             self._bridge.busy.emit(f"Loading {model} on {device}\u2026")
             try:
                 import keyboard
@@ -616,8 +631,10 @@ class MainWindow(QMainWindow):
                 )
                 listener.start()
                 self._listener = listener
+                _log.info("Engine ready: model=%s device=%s", model, device)
                 self._bridge.ready.emit(True)
             except Exception as exc:  # pragma: no cover - runtime/model dependent
+                _log.exception("Engine failed to start: model=%s device=%s", model, device)
                 self._bridge.error.emit(str(exc))
 
     def _rebuild_engine(self) -> None:
@@ -644,20 +661,23 @@ class MainWindow(QMainWindow):
     def _on_ready(self, _ready: bool) -> None:
         self._set_dot(theme.COLORS["success"])
         self._status_text.setText("Idle \u00b7 running in background")
+        self._loading_bar.setVisible(False)
         self._set_engine_controls_enabled(True)
 
     @Slot(str)
     def _on_busy(self, message: str) -> None:
         self._set_dot(theme.COLORS["muted"])
         self._status_text.setText(message)
+        self._loading_bar.setVisible(True)
         self._set_engine_controls_enabled(False)
 
     @Slot(str)
     def _on_error(self, message: str) -> None:
         self._set_dot(theme.COLORS["danger"])
         self._status_text.setText("Engine error")
+        self._loading_bar.setVisible(False)
         self._set_engine_controls_enabled(True)
-        print(f"[Betaal][gui] engine error: {message}")
+        _log.error("Engine error reported to UI: %s", message)
 
     def _set_engine_controls_enabled(self, enabled: bool) -> None:
         """Disable model/device switching while the engine is (re)loading."""

@@ -12,10 +12,10 @@ from datetime import datetime
 
 import numpy as np
 
+from core import paths
 from core.processor import AudioCapture
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SPEAKERS_DIR = os.path.join(_BASE_DIR, ".speakers")
+SPEAKERS_DIR = str(paths.speakers_dir())
 SAMPLE_RATE = 16000
 
 

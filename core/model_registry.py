@@ -17,7 +17,7 @@ MODELS = {
     },
 }
 
-DEFAULT_MODEL_DISPLAY = "Whisper Large"
+DEFAULT_MODEL_DISPLAY = "Cohere-transcribe"
 
 # Backward-compatible name -> id mapping.
 MODEL_DISPLAY_TO_ID = {name: meta["id"] for name, meta in MODELS.items()}

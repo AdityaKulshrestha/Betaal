@@ -22,6 +22,11 @@ dependencies = [
     "transformers>=4.44.0",
 ]
 
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.10",
+]
+
 [project.scripts]
 betaal = "main:main"
 

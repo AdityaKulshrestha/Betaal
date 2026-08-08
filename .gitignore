@@ -5,3 +5,8 @@ __pycache__
 .models
 *.wav
 tests
+
+# Packaging artifacts
+build/
+dist/
+installer/Output/

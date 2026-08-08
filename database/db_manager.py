@@ -4,15 +4,15 @@ Tracks words typed, session durations, and estimated time saved. The database
 file is created automatically on first use and lives alongside the application.
 """
 
-import os
 import sqlite3
 import threading
 from datetime import datetime
 
-# Resolve the database path relative to the project root so the app works
-# regardless of the current working directory it is launched from.
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE_DIR, "app_metrics.db")
+from core import paths
+
+# Database lives under ~/.cache/betaal (or the legacy in-repo file when present
+# in a source checkout), so the app works regardless of the launch directory.
+DB_PATH = str(paths.db_path())
 
 # A single connection is shared across threads (the hotkey listener writes,
 # the GUI reads). check_same_thread=False is required; a lock serializes access.

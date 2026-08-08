@@ -5,10 +5,19 @@ which also runs the background dictation engine (global hotkey + ASR).
 
     python main.py            # native desktop app (default)
     python main.py headless   # engine only, no window (global hotkey)
+    python main.py setup       # download + optimize models, then exit
 """
 
 import sys
 import threading
+import traceback
+
+# Configured before any other core import so print()/exceptions during those
+# imports are captured too (critical for the --noconsole packaged build,
+# where sys.stdout/sys.stderr are None). Logs land in ~/.cache/betaal/logs/.
+from core.logging_setup import setup_logging
+
+setup_logging()
 
 from core.config_store import load_config
 from core.hotkey_listener import HotkeyListener
@@ -50,9 +59,56 @@ def headless():
         print("[Betaal] Shutting down.")
 
 
+def setup():
+    """Download and optimize all runtime models, then exit.
+
+    Meant to run once on the target machine (e.g. right after install). It
+    downloads the ASR, VAD and LLM assets into ``~/.cache/betaal`` and warms
+    the OpenVINO compile cache for the configured devices -- the device-specific
+    "optimization" that cannot be pre-baked into the installer. Devices fall
+    back to CPU automatically when a GPU is unavailable.
+    """
+    from core.processor import TextPipeline
+    from core.reformatter import Reformatter
+
+    config = load_config()
+    db_manager.init_db()
+
+    print("[Betaal][setup] Downloading + optimizing ASR/VAD models...")
+    try:
+        TextPipeline(
+            model_display_name=config["asr_model"],
+            vad_threshold=config["vad_threshold"],
+            log_transcript=False,
+            device=config["asr_device"],
+            min_silence_ms=config["min_silence_ms"],
+            max_segment_seconds=config["max_segment_seconds"],
+        )
+        print("[Betaal][setup] ASR/VAD ready.")
+    except Exception as exc:  # pragma: no cover - runtime/model dependent
+        print(f"[Betaal][setup] ASR/VAD preparation failed: {exc}")
+        print(traceback.format_exc())
+
+    print("[Betaal][setup] Downloading + optimizing reformatter LLM...")
+    try:
+        Reformatter(
+            model_display_name=config["llm_model"],
+            device=config["llm_device"],
+        ).load()
+        print("[Betaal][setup] LLM ready.")
+    except Exception as exc:  # pragma: no cover - runtime/model dependent
+        print(f"[Betaal][setup] LLM preparation failed: {exc}")
+        print(traceback.format_exc())
+
+    print("[Betaal][setup] Done.")
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    print(f"[Betaal] Starting mode={mode or 'gui'}")
     if mode == "headless":
         headless()
+    elif mode == "setup":
+        setup()
     else:
         main()

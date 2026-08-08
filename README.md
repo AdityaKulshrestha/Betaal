@@ -1,161 +1,165 @@
 # Betaal
 
 Betaal is an offline, Windows background dictation app that produces real-time
-transcriptions (in the spirit of Wispr Flow).
+transcriptions (in the spirit of Wispr Flow). It runs as a native PySide6 desktop
+app that lives in the system tray and types recognized speech into whatever app
+currently has focus.
+
+> Native, not browser-based — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> for the internal design.
+
+## Features
 
 - **Standalone native Windows app** — PySide6 (Qt) desktop window, dark theme.
   No browser, no WebView, no web toolchain.
-- **System tray + collapsible settings sidebar**.
+- **System tray + collapsible settings sidebar**; runs in the background.
 - Global hotkey **`Ctrl+Shift+Space`** to start/stop continuous dictation.
 - Microphone capture at 16 kHz, mono, `float32`.
 - Voice-activity chunking with **Silero VAD** (ONNX).
-- **Model-agnostic** speech-to-text. First backend: Cohere Transcribe (OpenVINO IR),
-  running fully in-process via OpenVINO (no HTTP).
-- Injects recognized text into **whatever app currently has focus** and logs it
-  as an activity entry.
+- **Model-agnostic** speech-to-text running fully in-process via **OpenVINO**
+  (no HTTP). See [Supported models](#supported-models).
+- Injects recognized text into **whatever app currently has focus** and logs it.
+- Optional **clipboard reformatter** — a small local LLM cleans up selected text
+  on a second hotkey (`Ctrl+Alt+R`).
 - Usage analytics (words dictated, time saved, avg daily words) in SQLite.
-- Fully offline after a one-time model download on first run.
+- **Fully offline** after a one-time model download on first run.
 
-> **Native, not browser-based.** The UI is a PySide6 / Qt window that runs the
-> dictation engine in the *same* process — no Node, Rust, or WebView2 required,
-> and it packages to a single `.exe`.
+## How to use
 
-## Architecture
+1. Install Betaal (see [Installation](#installation)) and let the first-run
+   setup download + optimize the models — see [Supported models](#supported-models)
+   below to choose which ones.
+2. Betaal starts minimized to the **system tray**. Put focus in any app (Gmail,
+   Chrome, Word, a text box).
+3. Press the global hotkey (default `Ctrl+Shift+Space`) once to **start**
+   continuous dictation and again to **stop**. Recognized text is typed into
+   that focused app at your cursor.
+4. Select text anywhere and press `Ctrl+Alt+R` to **reformat** it with the local
+   LLM. Open the Betaal window to see analytics, the live activity log, and the
+   settings sidebar (pick models, tune VAD sensitivity, enroll a speaker).
 
-```
-        ┌────────────────────────────────────────┐
-        │         Native UI (PySide6 / Qt)        │   activity logger:
-        │   dashboard · activity log · sidebar    │   dashboard + live log;
-        │         system tray · dark theme        │   never a paste target
-        └────────────────────┬───────────────────┘
-                     in-process calls + Qt signals
-        ┌────────────────────┴───────────────────┐
-        │         Dictation engine (Python)       │──▶ Global hotkey (keyboard)
-        │   sounddevice · Silero VAD · OpenVINO   │    keystroke/clipboard inject
-        │         ASR · SQLite analytics          │    into the FOCUSED app
-        └─────────────────────────────────────────┘
-```
+Settings persist to `config.json`; analytics persist in `app_metrics.db` — both
+under `%USERPROFILE%\.cache\betaal`.
 
-Everything runs in **one Python process**: the Qt window and the background
-hotkey engine share memory directly — no IPC, no sockets, no sidecar. Engine
-callbacks (which fire on background threads) are marshalled onto the UI thread
-with Qt signals.
+> The `keyboard` library may need Administrator rights for global hooks in some
+> apps. Run Betaal as Administrator if the hotkey is blocked in an elevated app.
 
-### How it works
+## Demo
 
-- Betaal runs **in the background** (system tray). You work in any app —
-  Gmail, Chrome, Word, a text field — and press the **global hotkey**.
-- Recognized text is injected **into whatever app currently has focus**
-  (via clipboard paste, restoring your previous clipboard afterward). It is
-  **never** shown or pasted onto Betaal's own window.
-- The desktop window is a **logger**: it displays what happened — usage metrics
-  and a live activity log of every dictation — plus the settings sidebar. It
-  is read-only and does not capture your dictation focus.
+<!-- Replace the link below with the actual demo video URL. -->
+[![Betaal demo](assets/betaal.png)](https://example.com/betaal-demo)
 
-Pipeline (dictation):
+## Supported models
 
-```
-mic ─▶ AudioCapture ─▶ Silero VAD ─▶ [queue] ─▶ ASR (OpenVINO) ─▶ inject into focused app + log entry
-       16k mono f32     speech segs    bounded     text
-```
+All models are pre-optimized **OpenVINO IR** and download on first run (or via
+`Betaal.exe setup`) into `%USERPROFILE%\.cache\betaal`.
 
-## Repository layout
+### Speech-to-text (ASR)
 
-```
-Betaal/
-  main.py                   Entry point: native app (default) · headless
-  config.json               Persisted user configuration
-  pyproject.toml            Python package + dependencies
-  app_metrics.db            SQLite usage stats + notes (auto-created)
-  assets/                   App icon (betaal.png / betaal.ico)
-  .models/                  Auto-downloaded ASR + VAD assets (first run)
-  desktop/                  Native PySide6 UI (the app)
-    main_window.py          Window: sidebar · dashboard · activity log · tray
-    widgets.py              Metric cards, collapsible sections, note cards
-    theme.py                Dark Qt stylesheet + palette
-  core/
-    config_store.py         Shared config load/save
-    hotkey_listener.py      Background global hotkey + dictation loop
-    processor.py            AudioCapture · Silero VAD · OpenVINO ASR pipeline
-    model_manager.py        First-run model download/verify
-    model_registry.py       Display-name → registry-ID mapping
-    speaker.py              Speaker-enrollment WAV recorder
-  database/
-    db_manager.py           SQLite logging (words, duration, time saved, notes)
-```
+| Display name        | Registry ID                                    | Precision |
+| ------------------- | ---------------------------------------------- | --------- |
+| `Cohere-transcribe` | `Aditya02/cohere-transcribe-03-2026-ov-fp16`   | FP16      |
+| `Whisper Large`     | `OpenVINO/whisper-large-v3-int4-ov`            | INT4      |
 
-## Setup
+### Clipboard reformatter (LLM)
 
-The whole app is Python. You only need **Python 3.10+** and
-[`uv`](https://docs.astral.sh/uv/) — no Node, Rust, MSVC, or WebView2.
+| Display name             | Registry ID                                 | Precision |
+| ------------------------ | ------------------------------------------- | --------- |
+| `LFM2.5 350M`            | `OpenVINO/LFM2.5-350M-int8-ov`              | INT8      |
+| `Qwen2.5-1.5B Instruct`  | `OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov`    | INT4      |
+| `TinyLlama 1.1B Chat`    | `OpenVINO/TinyLlama-1.1B-Chat-v1.0-int4-ov` | INT4      |
+| `Phi-3 Mini Instruct`    | `OpenVINO/Phi-3-mini-4k-instruct-int4-ov`   | INT4      |
 
-From the `Betaal/` folder:
+### Voice activity detection
+
+- **Silero VAD** (ONNX) — auto-downloaded to `.cache/betaal/vad/silero_vad.onnx`.
+
+## Installation
+
+### Option 1 — Download the installer (recommended)
+
+1. Download `Betaal-Setup-<version>.exe` from the releases page.
+2. Run it. The installer is **per-user (no admin)**, adds a Start Menu entry,
+   optionally a login **Startup** shortcut (background tray), and — when the
+   *first-run setup* task is selected — downloads and optimizes the models.
+3. Launch Betaal from the Start Menu (or it auto-starts at login if enabled).
+
+### Option 2 — Build from source
+
+**Prerequisites**
+
+- **Python 3.10+**
+- [`uv`](https://docs.astral.sh/uv/) (package / venv manager)
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php) — only needed to build the
+  installer (2b)
+
+**Clean setup**
 
 ```powershell
+git clone <repo-url>
+cd Betaal
 uv venv
-.venv\Scripts\activate            # Windows
 uv sync
 ```
 
-Launch the **native desktop app** (this is the default):
+**Run directly from source** (no packaging):
 
 ```powershell
-uv run betaal
+uv run betaal                   # native desktop app (default)
+uv run python main.py headless  # engine only, no window
+uv run python main.py setup     # download + optimize models, then exit
 ```
 
-That opens the standalone Betaal window — dashboard (words, time saved, avg
-daily words), the live activity log, and a collapsible sidebar to pick the ASR
-model, tune VAD sensitivity, and enroll speaker samples. Closing the window
-hides it to the system tray; the global hotkey keeps working in the background.
-
-Other modes:
+**2a. Build the standalone app bundle**
 
 ```powershell
-python main.py headless   # engine only, no window (global hotkey)
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ```
 
-> The `keyboard` library needs Administrator rights for global hooks in some
-> apps. Run the terminal as Administrator if the hotkey is blocked.
+Produces `dist\Betaal\Betaal.exe` — a portable one-directory bundle you can zip
+and copy to another machine.
 
-## Usage
-
-Put focus in any app (Gmail, Chrome, Word, a text box), then press the global
-hotkey (default `ctrl+shift+space`) once to start continuous dictation and
-again to stop. Recognized text is typed **into that focused app** at your
-cursor and logged in Betaal's activity view. Settings persist to `config.json`;
-analytics and the activity log persist in `app_metrics.db`.
-
-## Models
-
-`Cohere-transcribe` maps to the registry ID
-`Aditya02/cohere-transcribe-03-2026-ov-fp16`. On first run, Betaal
-auto-downloads missing assets into `.models/`:
-
-- ASR OpenVINO model snapshot under `.models/asr/`
-- ONNX Silero VAD file at `.models/vad/silero_vad.onnx`
-
-## Packaging
-
-Bundle the whole app (window + engine) into a single windowed executable with
-PyInstaller:
+**2b. Build the installer**
 
 ```powershell
-pyinstaller --noconsole --name Betaal --icon assets\betaal.ico `
-  --add-data "assets;assets" main.py
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Installer
 ```
 
-The result is `dist/Betaal/Betaal.exe`. Ship the `.models/` folder alongside it
-(or let it download on first run). Optionally wrap it with Inno Setup and add a
-`Shell:Startup` shortcut so Betaal launches at login.
+Produces `installer\Output\Betaal-Setup-<version>.exe`. The script auto-detects
+`ISCC.exe` from a machine-wide or per-user Inno Setup install.
 
+> Models are **not** bundled. They download and are optimized (device-specific
+> OpenVINO compile) on the target machine into `%USERPROFILE%\.cache\betaal`.
 
-## RoadMap
-- [x] Added cohere model for transcription
-- [x] Added VAD with onnx
-- [x] Changed cohere processor with non-torch dependency
+## Supported hardware (Windows on Intel AI PC)
+
+Betaal runs entirely on **OpenVINO**, so it targets Intel AI PCs end to end:
+
+- **OS:** Windows 10 / 11, x86-64.
+- **CPU:** any modern Intel Core (used by default for the reformatter LLM, and as
+  the automatic fallback for ASR).
+- **GPU:** Intel Arc / Iris Xe integrated or discrete GPU (default device for
+  ASR; falls back to CPU when no GPU is present).
+- **NPU:** Intel Core Ultra (Meteor Lake / Lunar Lake / Arrow Lake) AI PCs —
+  selectable as an OpenVINO device where supported.
+
+Device selection is configurable per model (`asr_device`, `llm_device`) with
+`AUTO` and CPU fallback, so Betaal works across the full Intel AI PC lineup.
+
+## Logs
+
+Betaal writes a rotating debug log to
+`%USERPROFILE%\.cache\betaal\logs\betaal.log` (kept for both source and
+installed runs). It captures startup, model load/compile, and any errors —
+check it first if the engine fails to start or the UI behaves unexpectedly.
+
+## Roadmap
+
+- [x] Added Cohere model for transcription
+- [x] Added VAD with ONNX
+- [x] Changed Cohere processor with non-torch dependency
 - [x] Add VAD based chunking
-- [ ] Add check and fallback for GPU to CPU 
-
+- [x] Add check and fallback for GPU to CPU
 
 ## License
 

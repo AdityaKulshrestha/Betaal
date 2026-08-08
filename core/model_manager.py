@@ -11,6 +11,7 @@ import os
 from urllib.request import urlopen
 from typing import Dict
 
+from core import paths
 from core.model_registry import (
     DEFAULT_MODEL_DISPLAY,
     resolve_backend,
@@ -20,8 +21,7 @@ from core.model_registry import (
 
 _META_JSON = "ov_cohere_transcribe_kvcache.json"
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODELS_DIR = os.path.join(_BASE_DIR, ".models")
+MODELS_DIR = str(paths.models_dir())
 ASR_DIR = os.path.join(MODELS_DIR, "asr")
 LLM_DIR = os.path.join(MODELS_DIR, "llm")
 VAD_DIR = os.path.join(MODELS_DIR, "vad")

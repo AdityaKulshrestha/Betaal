@@ -7,6 +7,7 @@ passes chunks through a low-overhead ASR queue, and returns merged text.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 import queue
@@ -18,19 +19,20 @@ import numpy as np
 from core.model_manager import ensure_required_models
 from core.model_registry import resolve_backend
 
+_log = logging.getLogger("betaal.asr")
+
 
 def _ov_cache_dir() -> str | None:
-    """Local (non-OneDrive) directory for OpenVINO compiled-model caching.
+    """Directory for OpenVINO compiled-model caching under ~/.cache/betaal.
 
-    Keeping the multi-GB compiled blob on LOCAL storage (LOCALAPPDATA) avoids
-    OneDrive uploading / dehydrating it, which would otherwise force a slow
-    recompile on the next boot.
+    Keeping the multi-GB compiled blob outside any OneDrive-synced folder
+    avoids uploading / dehydrating it, which would force a slow recompile on
+    the next boot.
     """
     try:
-        root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-        cache_dir = os.path.join(root, "Betaal", "ov_cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        return cache_dir
+        from core import paths
+
+        return str(paths.ov_cache_dir())
     except Exception:  # pragma: no cover - env dependent
         return None
 
@@ -376,6 +378,7 @@ class OVASRBackend:
             return True
         except Exception as exc:
             print(f"[Betaal][asr] KV-cache init failed on {device}: {exc}")
+            _log.exception("KV-cache ASR init failed on %s", device)
             return False
 
     @staticmethod
