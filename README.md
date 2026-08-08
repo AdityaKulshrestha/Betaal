@@ -1,7 +1,7 @@
 # Betaal
 
 Betaal is an offline, Windows background dictation app that produces real-time
-transcriptions (in the spirit of Wispr Flow). It runs as a native PySide6 desktop
+transcriptions. It runs as a native PySide6 desktop
 app that lives in the system tray and types recognized speech into whatever app
 currently has focus.
 
