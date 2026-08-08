@@ -26,6 +26,10 @@ currently has focus.
 - **Reset all data** button in the sidebar to wipe usage metrics and the
   activity log.
 
+## Demo
+
+<video src="./assets/demo.mp4" controls width="800"></video>
+
 ## How to use
 
 1. Install Betaal (see [Installation](#installation)) and let the first-run
@@ -46,10 +50,6 @@ under `%USERPROFILE%\.cache\betaal`.
 > The `keyboard` library may need Administrator rights for global hooks in some
 > apps. Run Betaal as Administrator if the hotkey is blocked in an elevated app.
 
-## Demo
-
-<!-- Replace the link below with the actual demo video URL. -->
-[![Betaal demo](assets/betaal.png)](https://example.com/betaal-demo)
 
 ## Supported models
 
