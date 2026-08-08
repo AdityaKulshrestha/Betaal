@@ -78,7 +78,7 @@ All models are pre-optimized **OpenVINO IR** and download on first run (or via
 
 ### Option 1 — Download the installer (recommended)
 
-1. Download `Betaal-Setup-<version>.exe` from the releases page.
+1. Download [Betaal-Setup.exe](https://github.com/AdityaKulshrestha/Betaal/releases/download/v0.1/Betaal-Setup-0.1.0.exe) from the releases page.
 2. Run it. The installer is **per-user (no admin)**, adds a Start Menu entry,
    optionally a login **Startup** shortcut (background tray), and — when the
    *first-run setup* task is selected — downloads and optimizes the models.
