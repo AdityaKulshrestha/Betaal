@@ -29,7 +29,7 @@ currently has focus.
 ## Demo
 
 <video controls width="800">
-  <source src="https://raw.githubusercontent.com/AdityaKulshrestha/Betaal/refs/heads/main/assets/demo.mp4" type="video/mp4">
+  <source src="https://github.com/AdityaKulshrestha/Betaal/releases/download/v0.1/demo.mp4" type="video/mp4">
 </video>
 
 ## How to use
