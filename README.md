@@ -26,8 +26,6 @@ currently has focus.
 - **Reset all data** button in the sidebar to wipe usage metrics and the
   activity log.
 
-## Demo
-
 <video controls width="800">
   <source src="https://github.com/AdityaKulshrestha/Betaal/releases/download/v0.1/demo.mp4" type="video/mp4">
 </video>
